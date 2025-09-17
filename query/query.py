@@ -146,53 +146,53 @@ class HybridRAG:
 
     # ---------- Load majors JSON built earlier into memory ----------
 
-    def load_majors_from_json(self, path: str = "extracted_majors.json") -> int:
-        """
-        Load majors from a JSON file written by the builder.
-        Ensures each major has an English name, pre-embeds them, and builds a name map.
-        Returns the number of majors loaded.
-        """
-        if not os.path.exists(path):
-            self.majors, self._major_vectors, self._name_map = [], [], {}
-            return 0
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f) or []
-        except Exception as e:
-            print(f"[majors] Failed to read {path}: {e}")
-            self.majors, self._major_vectors, self._name_map = [], [], {}
-            return 0
+    # def load_majors_from_json(self, path: str = "extracted_majors.json") -> int:
+    #     """
+    #     Load majors from a JSON file written by the builder.
+    #     Ensures each major has an English name, pre-embeds them, and builds a name map.
+    #     Returns the number of majors loaded.
+    #     """
+    #     if not os.path.exists(path):
+    #         self.majors, self._major_vectors, self._name_map = [], [], {}
+    #         return 0
+    #     try:
+    #         with open(path, "r", encoding="utf-8") as f:
+    #             raw = json.load(f) or []
+    #     except Exception as e:
+    #         print(f"[majors] Failed to read {path}: {e}")
+    #         self.majors, self._major_vectors, self._name_map = [], [], {}
+    #         return 0
 
-        majors: List[MajorProfile] = []
-        for item in raw:
-            majors.append(
-                MajorProfile(
-                    original_name=str(item.get("original_name", "")).strip(),
-                    english_name=str(item.get("english_name", "")).strip(),
-                    keywords=[str(x).strip() for x in item.get("keywords", []) if str(x).strip()],
-                    sample_courses=[str(x).strip() for x in item.get("sample_courses", []) if str(x).strip()],
-                    source=str(item.get("source", "majors.pdf")),
-                )
-            )
+    #     majors: List[MajorProfile] = []
+    #     for item in raw:
+    #         majors.append(
+    #             MajorProfile(
+    #                 original_name=str(item.get("original_name", "")).strip(),
+    #                 english_name=str(item.get("english_name", "")).strip(),
+    #                 keywords=[str(x).strip() for x in item.get("keywords", []) if str(x).strip()],
+    #                 sample_courses=[str(x).strip() for x in item.get("sample_courses", []) if str(x).strip()],
+    #                 source=str(item.get("source", "majors.pdf")),
+    #             )
+    #         )
 
-        # Keep names as in JSON (already English). If needed you can call _ensure_english_names here.
-        self.majors = majors
+    #     # Keep names as in JSON (already English). If needed you can call _ensure_english_names here.
+    #     self.majors = majors
 
-        # Pre-embed for later matching (uses english_name + keywords + courses)
-        texts, names = [], []
-        for m in self.majors:
-            profile_text = " | ".join([
-                m.english_name,
-                " ".join(m.keywords[:10]),
-                " ".join(m.sample_courses[:30]),
-            ])
-            texts.append(profile_text)
-            names.append(m.english_name)
-        self._major_vectors = self.embeddings.embed_documents(texts) if texts else []
-        self._major_vectors = list(zip(names, self._major_vectors)) if texts else []
-        self._name_map = {m.english_name: m.original_name for m in self.majors}
+    #     # Pre-embed for later matching (uses english_name + keywords + courses)
+    #     texts, names = [], []
+    #     for m in self.majors:
+    #         profile_text = " | ".join([
+    #             m.english_name,
+    #             " ".join(m.keywords[:10]),
+    #             " ".join(m.sample_courses[:30]),
+    #         ])
+    #         texts.append(profile_text)
+    #         names.append(m.english_name)
+    #     self._major_vectors = self.embeddings.embed_documents(texts) if texts else []
+    #     self._major_vectors = list(zip(names, self._major_vectors)) if texts else []
+    #     self._name_map = {m.english_name: m.original_name for m in self.majors}
 
-        return len(self.majors)
+    #     return len(self.majors)
 
    
     # ==================== Interview & Reco engine ====================
