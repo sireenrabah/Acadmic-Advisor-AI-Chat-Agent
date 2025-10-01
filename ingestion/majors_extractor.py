@@ -19,20 +19,19 @@ from dotenv import load_dotenv
 # ---- PDF text ----
 try:
     # same-dir import style for your tree: ingestion/PDFProcessor.py
-    from .PDFProcessor import PDFProcessor  # type: ignore
+    from .pdf_processor import PDFProcessor  # type: ignore
 except Exception:
     PDFProcessor = None  # type: ignore
 
 # ---- translator (support both styles) ----
 try:
-    # style A: class MajorsTranslator with translate_name_map(list[str]) -> dict
-    from .translator import MajorsTranslator  # type: ignore
+    
+    from translator import MajorsTranslator  
 except Exception:
-    MajorsTranslator = None  # type: ignore
+    MajorsTranslator = None 
 
 try:
-    # style B: module-level translate_batch(list[str], target_lang="en") -> list[str]
-    from . import translator as _translator_mod  # type: ignore
+    import translator as _translator_mod  # type: ignore
 except Exception:
     _translator_mod = None  # type: ignore
 
