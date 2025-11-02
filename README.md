@@ -1,4 +1,4 @@
-# AI-acadmic-Advaisor
+# AI-academic-Advaisor
  pip install -r requirements.txt
  pip install pydantic-ai
 
@@ -25,4 +25,32 @@ Remove-Item -Recurse -Force .\chroma_db\
 #to delete data from ingested_files:
 Remove-Item -Force .\ingested_files.json
 
+Remove-Item -Force .\majors_profiles.json
+
+Remove-Item -Force .\majors_embeddings.json
+Remove-Item -Recurse -Force .\chroma_db\
+Remove-Item -Force .\ingested_files.json
 Remove-Item -Force .\extracted_majors.json
+
+npm i react-markdown remark-gfm clsx lucide-react
+
+--------------------------------------------
+
+##root
+pip install -r requirements.txt
+
+
+###run backend
+cd "C:\Users\siree\Documents\Acadmic Advisor - Agent\academic_advisor_backend"
+
+uvicorn server:app --reload --port 8000
+
+
+
+###run forntend 
+cd "C:\Users\siree\Documents\Acadmic Advisor - Agent\academic_advisor_frontend"
+
+npm install
+npm run dev
+
+ 

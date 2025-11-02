@@ -1,0 +1,62 @@
+/* ----- START PAGE ONLY (no header overrides) ----- */
+
+/* Page spacing */
+.start-page .container {
+  padding-top: 8px;
+  padding-bottom: 40px;
+}
+
+/* Hero layout */
+.start-page .hero {
+  display: grid;
+  grid-template-columns: 1.1fr .9fr;
+  gap: 28px;
+  align-items: center;
+}
+.start-page .hero-card {
+  padding: 28px;
+}
+
+/* Labels */
+.start-page .pill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: #2f4a3b;
+  background: #eef7f1;
+  border: 1px solid #d6eddc;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+.start-page .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #2f4a3b;
+  background: #eef7f1;
+  border: 1px solid #d6eddc;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+/* CTA = dark modern green with white text + hover */
+.start-page .btn.cta {
+  background: linear-gradient(180deg, #166534, #14532d);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(16,185,129,.22);
+}
+.start-page .btn.cta:hover { filter: brightness(1.06); }
+.start-page .btn.cta:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(16,185,129,.35); }
+.start-page .btn.cta:active { transform: translateY(1px); filter: brightness(.98); }
+
+/* Features grid */
+.start-page .grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.start-page .feature { padding: 18px; }
+.start-page .feature-emoji { font-size: 18px; margin-bottom: 6px; }

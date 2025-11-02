@@ -1,0 +1,80 @@
+.results-wrap { min-height: 100%; padding: 28px 16px; background: #f6faf6; }
+
+.results.container { max-width: 1040px; margin: 0 auto; } /* was 1000px */
+
+/* Global page title (no card) */
+.results-header { margin-bottom: 16px; }
+.page-title { font-size: 26px; font-weight: 800; letter-spacing: .1px; }
+.page-title.accent { color: #166534; }
+
+.card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+
+.btn { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; }
+.btn.cta{
+  background: linear-gradient(180deg, #166534, #14532d);
+  color: #fff; border-color: transparent; box-shadow: 0 6px 14px rgba(16,185,129,.22);
+}
+.btn.cta:hover { filter: brightness(1.06); }
+
+.loader, .empty, .error { margin-top: 12px; }
+.error { color: #b91c1c; background: #fff5f5; border-color: rgba(239,68,68,.35); }
+
+/* Vertical stack for cards */
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  /* removed: place-items:center; */
+  justify-items: stretch; /* ensure cards take full column width */
+}
+
+/* Slightly smaller cards */
+.rec-card {
+  width: 100%;          /* fill the grid column */
+  max-width: 780px;     /* was 700px */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rec-head { display: flex; align-items: center; gap: 10px; }
+.badge-rank {
+  font-size: 12px; color: #166534; background: #e8f3e8; border: 1px solid #cfe6d0;
+  padding: 4px 8px; border-radius: 999px;
+}
+.rec-title { font-size: 18px; font-weight: 700; }
+
+.scorerow { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+
+.scorebar {
+  width: 58%;
+  max-width: 340px;      /* slightly larger cap since card is wider */
+  min-width: 180px;
+  height: 8px;
+  border-radius: 999px;
+  background: #eef3ef;
+  border: 1px solid #e2ece4;
+  overflow: hidden;
+}
+.scorebar .fill { height: 100%; background: linear-gradient(90deg, #16a34a, #166534); }
+.scorepct { min-width: 42px; text-align: right; font-weight: 700; color: #166534; }
+
+.reasons { margin: 8px 0 0; padding-left: 18px; color: var(--text); }
+.reasons li { margin: 4px 0; }
+
+.rec-footer { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-size: 12px; color: #166534; background: #e8f3e8; border: 1px solid #cfe6d0; border-radius: 999px; padding: 4px 8px;
+}
+.chip.light { color: #0b1720; background: #f2f7f2; border-color: #e2efe3; }
+
+.foot-actions { display: flex; justify-content: center; margin-top: 20px; }
+
+/* Label before the bar */
+.scorelabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0b1720;         /* same dark text as the page */
+  opacity: .9;
+  margin-right: 6px;
+  min-width: 44px;        /* keeps the row from jumping when numbers change */
+}
