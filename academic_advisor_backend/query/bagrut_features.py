@@ -121,10 +121,16 @@ SUBJECT2CRITERIA: Dict[str, List[str]] = {
 # helper: try to match variants like "History for Arabs" -> "History"
 _CANON_FALLBACKS = {
     "history for arabs": "History",
+    "history (arabic speakers)": "History",
     "arabic for arabs": "Arabic",
+    "arabic (native speakers)": "Arabic",
     "islamic heritage": "Islamic Heritage and Religion",
+    "islamic heritage & religion": "Islamic Heritage and Religion",
     "electronics": "Electronics and Computers",
     "electronics and computers": "Electronics and Computers",
+    "electronics & computers": "Electronics and Computers",
+    "citizenship": "Civics",
+    "עריכה": "Hebrew",  # Common OCR error for עברית
 }
 
 def _grade_to_0_100(g: float) -> float:
@@ -161,6 +167,9 @@ def _guess_units_from_name_heuristic(en_name: str) -> int:
         return 2
     return 3
 
+# Cache to prevent double translation (quota protection)
+_TRANSLATION_CACHE = {}
+
 def to_canonical_subject_en(raw_subject: str) -> str:
     """
     Use your Gemini-backed UI translator to map a raw subject (any language)
@@ -169,24 +178,40 @@ def to_canonical_subject_en(raw_subject: str) -> str:
     """
     if not raw_subject:
         return ""
+    
+    # Check cache first (prevent quota waste)
+    cache_key = str(raw_subject).strip()
+    if cache_key in _TRANSLATION_CACHE:
+        return _TRANSLATION_CACHE[cache_key]
+    
     # translate raw -> English (UITranslator picks English when lang is 'en')
     # we force 'en' by passing lang='en'
     tr = _ui_tr()
-    en = tr.tr("en", str(raw_subject).strip())
+    en = tr.tr("en", cache_key)
     base = en.strip()
+    
+    # DEBUG: Show translation output
+    if raw_subject.strip() != en:
+        print(f"[to_canonical:debug] '{raw_subject}' → '{en}'")
 
     # Try exact key match (case-insensitive)
     for k in SUBJECT2CRITERIA.keys():
         if base.lower() == k.lower():
+            _TRANSLATION_CACHE[cache_key] = k
             return k
 
     # Try simple fallbacks
     fb = _CANON_FALLBACKS.get(base.lower())
     if fb:
+        print(f"[to_canonical:fallback] '{base}' → '{fb}'")
+        _TRANSLATION_CACHE[cache_key] = fb
         return fb
 
     # As a last resort, Title Case the translated string (won't add criteria, but ok)
-    return base.title()
+    result = base.title()
+    print(f"[to_canonical:titlecase] '{base}' → '{result}'")
+    _TRANSLATION_CACHE[cache_key] = result
+    return result
 
 # ---------------------------------------------------------------------------------
 # I/O
@@ -237,7 +262,12 @@ def normalize_bagrut(bagrut: Dict) -> Dict:
     # Canonicalize + fill units
     new_by: Dict[str, Dict] = {}
     for subj_raw, rec in by_subject.items():
-        en = to_canonical_subject_en(subj_raw)
+        # Skip translation if already in English (from load_bagrut)
+        if subj_raw in SUBJECT2CRITERIA or subj_raw.lower() in _CANON_FALLBACKS:
+            en = subj_raw
+        else:
+            en = to_canonical_subject_en(subj_raw)
+        
         if not isinstance(rec, dict):
             continue
         u = rec.get("units")
@@ -336,10 +366,10 @@ def bagrut_signals(bagrut: Dict) -> Dict[str, float]:
     agg = {k: (sum(v) / len(v)) for k, v in out.items() if v}
     result = {k: 0.7 * s + 0.3 * min(100.0, s + 15.0) for k, s in agg.items()}
     
-    # DEBUG: Show top aggregated signals
-    top_signals = sorted(result.items(), key=lambda x: -x[1])[:5]
-    print(f"[bagrut_signals:debug] Top 5 aggregated signals:")
-    for crit, score in top_signals:
+    # DEBUG: Show ALL aggregated signals (not just top 5)
+    all_signals = sorted(result.items(), key=lambda x: -x[1])
+    print(f"[bagrut_signals:debug] ALL {len(all_signals)} aggregated signals:")
+    for crit, score in all_signals:
         print(f"  {crit}: {score:.1f}")
     
     return result

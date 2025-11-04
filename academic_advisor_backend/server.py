@@ -313,9 +313,21 @@ def turn_answer(req: TurnAnswerRequest):
     """
     Blend the user's last answer into the person profile.
     """
+    import sys
+    print(f"[/turn/answer] ==================== RECEIVED REQUEST ====================", flush=True)
+    print(f"[/turn/answer] Session: {req.session_id}", flush=True)
+    print(f"[/turn/answer] User text: '{req.user_text[:80]}...'", flush=True)
+    print(f"[/turn/answer] Last question: '{req.last_question[:80]}...'", flush=True)
+    sys.stdout.flush()
+    
     sess = _get_session(req.session_id)
     rag: HybridRAG = sess["rag"]
+    
+    print(f"[/turn/answer] About to call rag.absorb_answer()", flush=True)
     ok = rag.absorb_answer(user_text=req.user_text, last_question=req.last_question)
+    print(f"[/turn/answer] absorb_answer returned: {ok}", flush=True)
+    sys.stdout.flush()
+    
     return {"ok": bool(ok)}
 
 @app.post("/turn/next", response_model=TextResponse)
@@ -369,6 +381,90 @@ def finish(payload: Dict[str, Any]):
     if session_id and session_id in SESSIONS:
         SESSIONS.pop(session_id, None)
     return {"ok": True}
+
+@app.post("/turn/major_info", response_model=TextResponse)
+def turn_major_info(req: Dict[str, Any]) -> TextResponse:
+    """
+    Handle user request for major details after recommendations.
+    User can type:
+    - A number: "1", "2", "3"
+    - A major name: "Computer Science", "מדעי המחשב"
+    
+    Returns formatted eligibility rules + sample courses in target language.
+    """
+    session_id = req.get("session_id")
+    user_text = req.get("user_text", "").strip()
+    recommended_majors = req.get("recommended_majors", [])  # [{name, english_name, score}, ...]
+    
+    sess = _get_session(session_id)
+    rag: HybridRAG = sess["rag"]
+    lang = sess.get("lang") or "en"
+    
+    # Try to match by number first (1-3)
+    major_to_show = None
+    if user_text.isdigit():
+        idx = int(user_text) - 1
+        if 0 <= idx < len(recommended_majors):
+            major_to_show = recommended_majors[idx]
+    
+    # If not a number, try matching by name (partial or full)
+    if not major_to_show and recommended_majors:
+        user_lower = user_text.lower()
+        for major in recommended_majors:
+            original = (major.get("original_name") or "").lower()
+            english = (major.get("english_name") or "").lower()
+            if user_lower in original or user_lower in english or original in user_lower or english in user_lower:
+                major_to_show = major
+                break
+    
+    if not major_to_show:
+        from query.query import _ui_tr
+        return TextResponse(text=_ui_tr().tr(lang, "I couldn't find that major. Please type 1, 2, or 3, or the major name."))
+    
+    # Get full major details
+    english_name = major_to_show.get("english_name", "")
+    major = rag.get_major_by_english_name(english_name)
+    if not major:
+        from query.query import _ui_tr
+        return TextResponse(text=_ui_tr().tr(lang, f"Sorry, I couldn't find details for {english_name}."))
+    
+    # Check eligibility
+    from query.bagrut_features import eligibility_flags_from_rules
+    is_eligible, eligibility_messages = eligibility_flags_from_rules(
+        major.get("eligibility_rules", {}),
+        rag.bagrut_json or {}
+    )
+    
+    # Format response in target language
+    from query.query import _ui_tr
+    response_parts = []
+    
+    # Major name + match score
+    original_name = major.get("original_name", english_name)
+    score = major_to_show.get("score", 0)
+    response_parts.append(f"📚 {original_name} ({score:.1f}% {_ui_tr().tr(lang, 'Match')})")
+    response_parts.append("")
+    
+    # Eligibility status
+    if is_eligible:
+        response_parts.append(f"✅ {_ui_tr().tr(lang, 'You meet the eligibility requirements!')}")
+    else:
+        response_parts.append(f"⚠️ {_ui_tr().tr(lang, 'Eligibility Requirements:')}")
+        for msg in eligibility_messages[:3]:  # Show top 3 issues
+            response_parts.append(f"   • {msg}")
+    response_parts.append("")
+    
+    # Sample courses
+    courses = major.get("sample_courses", [])
+    if courses:
+        response_parts.append(f"📖 {_ui_tr().tr(lang, 'Sample Courses:')}")
+        for course in courses[:5]:  # Show up to 5 courses
+            response_parts.append(f"   • {course}")
+        if len(courses) > 5:
+            response_parts.append(f"   {_ui_tr().tr(lang, '...and more')}")
+    
+    return TextResponse(text="\n".join(response_parts))
+
 
 @app.get("/major/{major_name}")
 def get_major_details(major_name: str, session_id: str):

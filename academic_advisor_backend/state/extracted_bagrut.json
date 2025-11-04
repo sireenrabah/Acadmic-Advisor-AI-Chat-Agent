@@ -1,58 +1,58 @@
 {
   "subjects": [
     {
-      "subject": ")עברית",
-      "final_grade": 93.0,
+      "subject": ")עברית (בי\"ס דרוזי",
+      "final_grade": 76.0,
       "units": null,
-      "year": 2025
+      "year": 2020
     },
     {
       "subject": "אנגלית",
-      "final_grade": 98.0,
+      "final_grade": 71.0,
       "units": null,
-      "year": 2025
+      "year": 2020
     },
     {
-      "subject": "ערבית לערבים",
-      "final_grade": 96.0,
+      "subject": "ערבית לדרוזים",
+      "final_grade": 75.0,
       "units": null,
-      "year": 2025
+      "year": 2020
     },
     {
-      "subject": "היסטוריה לערבים",
-      "final_grade": 100.0,
+      "subject": "היסטוריה לדרוזים",
+      "final_grade": 87.0,
       "units": null,
-      "year": 2024
+      "year": 2019
+    },
+    {
+      "subject": "מורשת דרוזית",
+      "final_grade": 84.0,
+      "units": null,
+      "year": 2019
     },
     {
       "subject": "אזרחות",
-      "final_grade": 100.0,
+      "final_grade": 67.0,
       "units": null,
-      "year": 2025
+      "year": 2019
     },
     {
       "subject": "מתמטיקה",
-      "final_grade": 80.0,
+      "final_grade": 76.0,
       "units": null,
-      "year": 2025
+      "year": 2020
     },
     {
       "subject": "פיזיקה",
-      "final_grade": 91.0,
+      "final_grade": 84.0,
       "units": null,
-      "year": 2025
+      "year": 2020
     },
     {
-      "subject": "מורשת ודת האסלאם",
-      "final_grade": 98.0,
+      "subject": "כימיה",
+      "final_grade": 70.0,
       "units": null,
-      "year": 2024
-    },
-    {
-      "subject": "אלקטרוניקה ומחשבים",
-      "final_grade": 90.0,
-      "units": null,
-      "year": 2024
+      "year": 2020
     }
   ],
   "source": "uploaded_bagrut.pdf"

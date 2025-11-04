@@ -43,13 +43,116 @@ function getAskedQuestions(msgs = []) {
     .map((m) => m.text);
 }
 function getLastQuestion(msgs = []) {
+  console.log("[getLastQuestion] Called with", msgs.length, "messages");
+  
+  // Search backwards for the last assistant message
+  // Check ORIGINAL text (before stripping) for "QUESTION:" prefix
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === "assistant" && msgs[i].text?.startsWith("QUESTION:")) {
-      return msgs[i].text;
+    const msg = msgs[i];
+    console.log(`[getLastQuestion] Checking msg[${i}]: role=${msg.role}, text_start="${msg.text?.substring(0, 30)}..."`);
+    
+    if (msg.role === "assistant") {
+      // Check if text starts with "QUESTION:" OR if it's a regular question
+      // (some questions might not have prefix after stripping for display)
+      const originalText = msg.text || "";
+      
+      if (originalText.startsWith("QUESTION:")) {
+        console.log("[getLastQuestion] Found QUESTION: prefix at index", i);
+        return originalText;  // Return WITH prefix for backend
+      }
+      
+      // Fallback: if it's an assistant message and doesn't start with __RECOMMEND__, treat as question
+      if (!originalText.startsWith("__RECOMMEND__")) {
+        console.log("[getLastQuestion] Found assistant message (no QUESTION: prefix) at index", i, "- re-adding prefix");
+        // Re-add prefix if missing (defensive programming)
+        return `QUESTION: ${originalText}`;
+      }
+      
+      console.log("[getLastQuestion] Skipping __RECOMMEND__ message at index", i);
     }
   }
+  
+  console.error("[getLastQuestion] NO question found in", msgs.length, "messages!");
   return null;
 }
+
+// Helper to strip "QUESTION: " prefix for display only
+function stripQuestionPrefix(text) {
+  if (text?.startsWith("QUESTION: ")) {
+    return text.slice("QUESTION: ".length);
+  }
+  return text;
+}
+
+// Helper to parse recommendations from __RECOMMEND__ text
+function parseRecommendationsFromText(text) {
+  /*
+  Expected format (Hebrew):
+  1. תואר ראשון B.Sc. :במדעי המחשב (90.1% התאמה)
+     Rationale text.
+  
+  OR (English):
+  1. Computer Science B.Sc. (90.1% Match)
+     Rationale text.
+  */
+  const lines = text.split('\n');
+  const majors = [];
+  let currentMajor = null;
+  
+  // Updated regex: captures "1. Major Name (90.1%" and stops before "התאמה" or "Match"
+  // Matches: "1. " + major name + " (" + number + "%" (optional space) + rest
+  const majorRegex = /^(\d+)\.\s+(.+?)\s+\((\d+(?:\.\d+)?)\s*%/;
+  
+  for (const line of lines) {
+    const match = line.match(majorRegex);
+    if (match) {
+      // Save previous major if exists
+      if (currentMajor) {
+        majors.push(currentMajor);
+      }
+      
+      // Start new major
+      // Remove trailing Hebrew/English match words from major name
+      let majorName = match[2].trim();
+      // Strip any trailing "התאמה)" or "Match)" that might have leaked into capture group 2
+      majorName = majorName.replace(/\s*(התאמה|Match)\)?$/i, '');
+      
+      currentMajor = {
+        rank: parseInt(match[1]),
+        original_name: majorName,
+        english_name: majorName, // Same as original for now
+        score: parseFloat(match[3])
+      };
+    }
+  }
+  
+  // Add last major
+  if (currentMajor) {
+    majors.push(currentMajor);
+  }
+  
+  console.log("[parseRecommendationsFromText] Parsed", majors.length, "majors:", majors);
+  return majors;
+}
+
+// Helper to detect if user is requesting major details
+function isMajorInfoRequest(text, hasMajors) {
+  if (!hasMajors || !text) return false;
+  
+  const t = text.trim().toLowerCase();
+  
+  // Check if it's just a number (1, 2, or 3)
+  if (/^[123]$/.test(t)) return true;
+  
+  // Check if it contains "yes" or confirmation words
+  if (t === 'yes' || t === 'כן' || t === 'نعم') return true;
+  
+  // Check if text contains multiple words (might be a major name)
+  if (t.split(/\s+/).length >= 2) return true;
+  
+  return false;
+}
+
 
 export default function ChatPage() {
   const nav = useNavigate();
@@ -63,6 +166,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [finished, setFinished] = useState(false);
+  const [recommendedMajors, setRecommendedMajors] = useState([]); // Store majors after recommendations
 
   const listRef = useRef(null);
 
@@ -131,21 +235,68 @@ export default function ChatPage() {
 
     setLoading(true);
     setError("");
+    
     try {
-      // 1) submit the user's answer to the LAST QUESTION
-      const lastQ = getLastQuestion(nextMsgs);
-      if (lastQ) {
-        await fetch(`${API_BASE}/turn/answer`, {
+      // CHECK: If user is requesting major details after recommendations
+      if (isMajorInfoRequest(text, recommendedMajors.length > 0)) {
+        console.log("[ChatPage] Detected major info request:", text);
+        console.log("[ChatPage] Available majors:", recommendedMajors);
+        
+        const r = await fetch(`${API_BASE}/turn/major_info`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             session_id: sessionId,
             user_text: text,
-            last_question: lastQ,
+            recommended_majors: recommendedMajors
           }),
-        })
-          .then((r) => r.json())
-          .catch(() => ({}));
+        });
+        
+        const data = await r.json();
+        const aiText = data?.text || "Sorry, I couldn't process that request.";
+        
+        const aiMsg = { role: "assistant", text: aiText, ts: Date.now(), id: uid() };
+        const after = [...nextMsgs, aiMsg];
+        setMessages(after);
+        localStorage.setItem("aa_session_msgs", JSON.stringify(after));
+        setLoading(false);
+        return;
+      }
+      
+      // NORMAL FLOW: Regular interview question/answer
+      // 1) submit the user's answer to the LAST QUESTION
+      const lastQ = getLastQuestion(nextMsgs);
+      console.log("[ChatPage] getLastQuestion returned:", lastQ ? lastQ.substring(0, 80) : "NULL");
+      console.log("[ChatPage] nextMsgs length:", nextMsgs.length);
+      console.log("[ChatPage] Last 3 messages:", nextMsgs.slice(-3).map(m => ({ role: m.role, text: m.text?.substring(0, 40) })));
+      
+      console.log("[ChatPage:CRITICAL] About to check lastQ. Value:", lastQ ? `"${lastQ.substring(0, 80)}..."` : "NULL/UNDEFINED");
+      
+      if (lastQ) {
+        const payload = {
+          session_id: sessionId,
+          user_text: text,
+          last_question: lastQ,
+        };
+        console.log("[ChatPage:CALLING] /turn/answer with payload:", JSON.stringify(payload).substring(0, 200));
+        
+        try {
+          const response = await fetch(`${API_BASE}/turn/answer`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          
+          console.log("[ChatPage:RESPONSE] /turn/answer status:", response.status, response.statusText);
+          
+          const data = await response.json();
+          console.log("[ChatPage:DATA] /turn/answer returned:", data);
+        } catch (err) {
+          console.error("[ChatPage:ERROR] /turn/answer failed:", err.message, err.stack);
+        }
+      } else {
+        console.error("[ChatPage:BUG] No last question found - /turn/answer NOT called!");
+        console.error("[ChatPage:BUG] nextMsgs dump:", JSON.stringify(nextMsgs.map(m => ({ role: m.role, text_length: m.text?.length, starts_with: m.text?.substring(0, 20) }))));
       }
 
       // 2) ask for the NEXT QUESTION (send history + asked_questions)
@@ -174,6 +325,11 @@ export default function ChatPage() {
         // Remove the signal prefix
         const content = aiText.replace("__RECOMMEND__\n", "").trim();
         
+        // Parse majors from the text for later major info requests
+        const parsedMajors = parseRecommendationsFromText(content);
+        console.log("[ChatPage] Parsed recommendations:", parsedMajors);
+        setRecommendedMajors(parsedMajors);
+        
         if (content) {
           // Show the transition message + inline recommendations in chat
           const aiMsg = { role: "assistant", text: content, ts: Date.now(), id: uid() };
@@ -182,8 +338,8 @@ export default function ChatPage() {
           localStorage.setItem("aa_session_msgs", JSON.stringify(withRecs));
         }
         
-        // Navigate to results after a delay (so user can read inline recs)
-        setTimeout(() => nav(`/results/${sessionId}`), 2500);
+        // DON'T auto-navigate! Let user explore major details first
+        // User can manually navigate or type major numbers
         setLoading(false);
         return;
       }
@@ -368,10 +524,12 @@ function UserAvatar() {
 
 function Message({ role, text }) {
   const isUser = role === "user";
+  // Strip "QUESTION: " prefix from advisor messages for display
+  const displayText = !isUser ? stripQuestionPrefix(text) : text;
   return (
     <div className={`msgrow ${isUser ? "user" : ""}`}>
       {!isUser && <AdvisorAvatar />}
-      <div className={`bubble ${isUser ? "user" : ""}`}>{text}</div>
+      <div className={`bubble ${isUser ? "user" : ""}`}>{displayText}</div>
       {isUser && <UserAvatar />}
     </div>
   );

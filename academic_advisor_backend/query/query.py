@@ -86,9 +86,8 @@ class HybridRAG:
         self.ui_language: Optional[str] = ui_language
         self.llm = llm
 
-        self.person = PersonProfile(criteria_keys=_KEYS, llm=llm)  # Pass LLM for enhanced scoring
-        if not hasattr(self.person, "scores") or not isinstance(getattr(self.person, "scores"), dict):
-            self.person.scores = {k: 50.0 for k in _KEYS}
+        # PersonProfile uses self.vector (not self.scores)
+        self.person = PersonProfile(criteria_keys=_KEYS, llm=llm)
 
         self.bagrut_json: Dict[str, Any] = {}
         self.signals: Dict[str, float] = {}
@@ -99,12 +98,11 @@ class HybridRAG:
         self.recommender = Recommender(
             person=self.person,
             majors=[],
-            ui_language=(self.ui_language or ""),
-            llm=self.llm,
         )
 
         self.last_question_text: str = ""
         self.last_answer_text: str = ""
+        self.all_interview_answers: List[str] = []  # Track all answers for field detection
 
     # ---------- session context ----------
     def set_session_context(self, *, ui_language: Optional[str], bagrut_json: Dict[str, Any]):
@@ -115,11 +113,25 @@ class HybridRAG:
         self.bagrut_json = dict(bagrut_json or {}) or _load_bagrut_from_disk_if_exists()
         self.signals = bagrut_signals(self.bagrut_json)
 
-        seed = seed_person_vector(_KEYS, self.signals)
-        self.person.scores.update(dict(zip(_KEYS, seed)))
+        # CRITICAL: Remove old scores dict if it exists (from legacy code)
+        # PersonProfile uses self.vector, not self.scores
+        if hasattr(self.person, 'scores'):
+            delattr(self.person, 'scores')
+            print(f"[set_session_context] Removed legacy scores dict")
+
+        # ONLY seed on first call (when person vector is still at neutral 50.0)
+        # If person has been updated from interview answers, preserve those updates!
+        current_avg = sum(self.person.vector) / len(self.person.vector) if self.person.vector else 50.0
+        if abs(current_avg - 50.0) < 1.0:  # Still at neutral seed
+            seed = seed_person_vector(_KEYS, self.signals)
+            for i, val in enumerate(seed):
+                self.person.vector[i] = val
+            print(f"[set_session_context] Seeded person vector from Bagrut (avg={current_avg:.1f})")
+        else:
+            print(f"[set_session_context] Preserving existing person vector (avg={current_avg:.1f} - already updated from interview)")
 
         self.recommender.set_language(self.ui_language)
-        self.recommender.llm = self.llm
+        self.recommender.set_llm(self.llm)
 
     def _ensure_language(self):
         if not self.ui_language:
@@ -127,7 +139,9 @@ class HybridRAG:
 
     def _has_bagrut(self) -> bool:
         b = normalize_bagrut(self.bagrut_json or {})
-        return bool((b.get("by_subject") or {}))
+        has_subjects = bool((b.get("by_subject") or {}))
+        print(f"[_has_bagrut:debug] bagrut_json={self.bagrut_json is not None}, by_subject count={len(b.get('by_subject', {}))}, result={has_subjects}")
+        return has_subjects
 
     def _get_example_phrase(self) -> str:
         """Return native example to prime LLM for target language."""
@@ -257,7 +271,7 @@ Your question (1 sentence):"""
         return {
             "greeting": greeting,
             "bagrut_summary": bagrut_summary,
-            "first_question": first_q
+            "first_question": f"QUESTION: {first_q}"  # ADD PREFIX for frontend parsing
         }
 
     # ---------- first question (LEGACY - kept for backward compatibility) ----------
@@ -329,27 +343,13 @@ Your question (1 sentence):"""
     def should_recommend_now(self, *, history: List[List[str]], turn_count: int) -> bool:
         """
         Decide if we should stop asking and show recommendations.
-        Considers: turn count, repetition, confidence, AND vector convergence.
+        Uses natural conversation flow based on vector convergence and confidence.
         
-        **NEW: More aggressive stopping** - after 5-6 answers, we have enough data.
+        REMOVED hard-coded keyword detection - let LLM's question strategy handle pacing.
         """
-        # Stop after 6-7 turns max (reduced from 10)
+        # Stop after 7 turns max (gives time for work environment questions)
         if turn_count >= 7:
             return True
-        
-        # Stop early if student gives clear direction (mentions specific field)
-        if turn_count >= 3:
-            # Check last 2 answers for field-specific keywords
-            recent_answers = [text.lower() for role, text in (history[-4:] if len(history) >= 4 else history) if role == "user"]
-            field_keywords = [
-                "מדעי מחשב", "computer science", "תכנות", "programming", "אלגוריתם",
-                "הנדס", "engineer", "נתונים", "data", "רפואה", "medicine",
-                "משפט", "law", "חינוך", "education", "עסק", "business",
-                "פסיכולוגיה", "psychology", "אומנות", "art"
-            ]
-            if any(kw in " ".join(recent_answers) for kw in field_keywords):
-                print(f"[stopping] Detected specific field mention at turn {turn_count}")
-                return True
         
         # Stop if student is being repetitive (early sign of boredom)
         if turn_count >= 4 and self._detect_repetitive_answers(history):
@@ -362,7 +362,7 @@ Your question (1 sentence):"""
         # Stop if we have high confidence across criteria
         if hasattr(self.person, 'confidence'):
             avg_confidence = sum(self.person.confidence) / len(self.person.confidence)
-            if turn_count >= 5 and avg_confidence >= 0.70:  # Lowered from 0.75
+            if turn_count >= 5 and avg_confidence >= 0.70:
                 return True
         
         return False
@@ -370,8 +370,9 @@ Your question (1 sentence):"""
     # ---------- next question ----------
     def ask_next_question(self, *, history: List[List[str]], asked_questions: List[str], hint: str = "") -> str:
         self._ensure_language()
-        # Always refresh so the latest uploads are visible immediately
+        # Always refresh Bagrut in case new upload happened
         self.bagrut_json = _load_bagrut_from_disk_if_exists() or self.bagrut_json
+        # Update signals for context, but DON'T re-seed person vector (it has interview updates!)
         self.signals = bagrut_signals(self.bagrut_json)
 
         if not self._has_bagrut():
@@ -382,7 +383,7 @@ Your question (1 sentence):"""
             else:
                 q = _ui_tr().tr(self.ui_language, "Please upload your Bagrut so I can tailor questions to your strengths.")
             self.last_question_text = q
-            return q
+            return f"QUESTION: {q}"  # ADD PREFIX
 
         recent_tail = " • ".join(asked_questions[-3:]) if asked_questions else "none"
         subj_phrase, top = _format_top_subjects_loc(self.bagrut_json, 3, self.ui_language or "en")
@@ -396,7 +397,7 @@ Your question (1 sentence):"""
         conversation_context = self._build_conversation_context(history, top)
 
         if self.llm:
-            prompt = f"""You are an academic advisor having a natural conversation in {self.ui_language}.
+            prompt = f"""You are an academic advisor speaking with a HIGH SCHOOL GRADUATE in {self.ui_language}.
 CRITICAL: Respond ONLY in {self.ui_language} language.
 
 Example phrase in {self.ui_language}: {self._get_example_phrase()}
@@ -406,10 +407,32 @@ STUDENT'S TOP STRENGTHS: {subj_phrase}
 CONVERSATION SO FAR:
 {conversation_context}
 
-YOUR GOAL: Ask the NEXT question to understand:
-- If short answers → probe concrete examples (specific courses/projects they'd enjoy)
-- If detailed → narrow down: programming vs. lab work vs. theory vs. applied fields
-- Always reference their Bagrut strengths naturally
+IMPORTANT CONTEXT:
+- This is a YOUNG ADULT (17-18 years old) who just finished high school
+- They DON'T know deep technical details about fields (NLP, machine learning, etc.)
+- They ARE exploring what TYPE OF WORK suits their personality and interests
+
+YOUR QUESTIONING STRATEGY:
+Turn 1-2: Ask about their Bagrut subjects - which did they genuinely ENJOY (not just excel at)?
+Turn 3-4: Ask about WORK ENVIRONMENT preferences:
+  - Do they prefer working indoors (office/lab) or outdoors?
+  - Do they like working independently or in teams?
+  - Physical work (hands-on, building) or mental work (thinking, analyzing)?
+  - Working with people (patients, students) or with systems/data?
+Turn 5-6: Ask about DAILY ACTIVITIES they find satisfying:
+  - Solving puzzles/problems vs. helping people vs. creating things?
+  - Structured routine vs. varied challenges?
+  - Theory/research vs. practical applications?
+
+AVOID:
+- ❌ Technical jargon (algorithms, NLP, machine translation, data structures)
+- ❌ Research topics (they're choosing a BACHELOR'S degree, not a PhD)
+- ❌ Over-specific sub-fields (unless they bring it up first)
+
+DO:
+- ✅ Ask about personality, work style, daily life preferences
+- ✅ Use concrete examples: "working in a hospital" vs. "working in an office"
+- ✅ Reference their Bagrut naturally: "You did well in Math - do you like solving puzzles?"
 
 RECENTLY ASKED (do NOT repeat):
 {chr(10).join(f"- {q}" for q in (asked_questions[-2:] if len(asked_questions) >= 2 else []))}
@@ -417,10 +440,10 @@ RECENTLY ASKED (do NOT repeat):
 SYSTEM HINT: {hint or "none"}
 
 Requirements:
-- Sound like a human advisor, not a chatbot
 - ONE question only
 - 1-2 sentences max
 - Natural conversational {self.ui_language}
+- Age-appropriate (high school graduate level)
 
 Your next question:"""
             q = self.llm.invoke(prompt).content.strip()
@@ -434,23 +457,142 @@ Your next question:"""
             q = _ui_tr().tr(self.ui_language, base)
 
         self.last_question_text = q
-        return q
+        return f"QUESTION: {q}"  # ADD PREFIX for frontend parsing
 
     # ---------- absorb ----------
     def absorb_answer(self, *, user_text: str, last_question: str) -> bool:
+        """
+        Absorb user's answer and update PersonProfile vector using LLM-based analysis.
+        The LLM identifies which criteria are relevant and scores them 0-100.
+        """
+        import sys
         self.last_answer_text = (user_text or "").strip()
+        
+        # Track all answers for field detection in recommendations
+        if self.last_answer_text:
+            self.all_interview_answers.append(self.last_answer_text)
+        
         try:
             # DEBUG: Print vector state before update
             old_scores = self.person.as_dict().copy()
             
-            update_person_profile(
-                self.person,
-                question_id=last_question,
-                answer_text=user_text,
-                history_text="",
-                weight=1.0,
-                temperature=0.0,
-            )
+            print(f"\n{'='*80}", flush=True)
+            print(f"[absorb:start] Processing answer: '{user_text[:50]}...'", flush=True)
+            print(f"[absorb:start] Last question was: '{last_question[:80]}...'", flush=True)
+            print(f"{'='*80}\n", flush=True)
+            sys.stdout.flush()
+            
+            # Detect Hebrew technical keywords as HINTS for the LLM (not as primary signals)
+            # This helps guide the LLM but doesn't bypass it
+            detected_keywords = []
+            answer_lower = user_text.lower()
+            
+            # Simple keyword detection (typo-tolerant via substring matching)
+            keyword_hints = [
+                ("מתמטיקה", "mathematics"),
+                ("מתמתיקה", "mathematics"),
+                ("הסתברות", "probability"),
+                ("אלגוריתם", "algorithms"),  # Catches both spellings
+                ("אלגורתם", "algorithms"),  # Alternative spelling
+                ("ניתוח נתונים", "data analysis"),
+                ("נתונים", "data"),
+                ("תכנות", "programming"),
+                ("מחשב", "computer science"),
+                ("פתר", "problem solving"),  # Catches פתרון/פתירת
+                ("בעיות", "problems"),
+            ]
+            
+            for hebrew_word, english_hint in keyword_hints:
+                if hebrew_word in answer_lower:
+                    detected_keywords.append(english_hint)
+            
+            # Detect passion/interest words
+            passion_words = ["אוהב", "אוהבת", "מעניין", "מעניינת", "נהנה", "נהנית"]
+            has_passion = any(word in answer_lower for word in passion_words)
+            
+            if detected_keywords:
+                print(f"[absorb:keywords] Detected hints: {', '.join(detected_keywords)}")
+                if has_passion:
+                    print(f"[absorb:keywords] Student expressed passion/interest")
+            
+            # Use LLM as PRIMARY analysis method (typo-tolerant, context-aware)
+            if self.llm:
+                criteria_list = "\n".join([f"- {k}" for k in _KEYS])
+                
+                # Get current top 5 scores for context
+                top_current = sorted(old_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+                current_context = "\n".join([f"- {k}: {v:.1f}" for k, v in top_current])
+                
+                # Build keyword hints section if detected
+                keyword_context = ""
+                if detected_keywords:
+                    keyword_context = f"\n\nDETECTED KEYWORDS IN ANSWER: {', '.join(detected_keywords)}"
+                    if has_passion:
+                        keyword_context += " (with passion/interest expressed)"
+                
+                analysis_prompt = f"""You are analyzing a student's answer to identify their interests and skills.
+
+QUESTION: {last_question}
+ANSWER: {user_text}{keyword_context}
+
+CURRENT TOP SCORES (from Bagrut/previous answers):
+{current_context}
+
+AVAILABLE CRITERIA (choose up to 3 most relevant):
+{criteria_list}
+
+SCORING GUIDELINES:
+- Mathematics/probability → quantitative_reasoning, logical_problem_solving, pattern_recognition
+- Algorithms/programming/coding → logical_problem_solving, systems_thinking, data_analysis
+- Data science/statistics/analysis → data_analysis, quantitative_reasoning, pattern_recognition
+- Computer science topics → data_analysis, logical_problem_solving, systems_thinking
+- Passion words (אוהב, love, enjoy, interesting, מעניין, נהנה) → boost to 96-100 range
+- Technical terms WITHOUT passion → score 88-94
+- Moderate interest → score 75-87
+- Weak interest → score 50-70
+
+CRITICAL: If student mentions BOTH technical term AND passion word, score 96-100!
+CRITICAL: "Algorithms" (אלגוריתמים/אלגורתמים) should ALWAYS include data_analysis + logical_problem_solving + systems_thinking!
+
+Return ONLY a JSON object with 1-3 most relevant criteria:
+{{"criterion_name": score_0_to_100}}
+
+JSON:"""
+                
+                try:
+                    response = self.llm.invoke(analysis_prompt).content.strip()
+                    # Extract JSON
+                    import json, re
+                    json_match = re.search(r'\{[^}]+\}', response)
+                    if json_match:
+                        criteria_scores = json.loads(json_match.group(0))
+                        
+                        # DEBUG: Show what LLM identified
+                        print(f"[absorb:llm] LLM response: {criteria_scores}")
+                        
+                        # Update profile with identified criteria
+                        for criterion, score in criteria_scores.items():
+                            if criterion in _KEYS:
+                                self.person.update_from_answer(
+                                    criterion,
+                                    float(score),
+                                    note="llm_analysis",
+                                    ext_weight=1.0,
+                                    temp=0.0
+                                )
+                        
+                        print(f"[absorb:llm] Identified {len(criteria_scores)} relevant criteria from answer")
+                    else:
+                        print(f"[absorb:warn] LLM response not valid JSON: {response[:100]}")
+                        # Fallback to old method
+                        self._fallback_absorb(user_text, last_question)
+                        
+                except Exception as e:
+                    print(f"[absorb:error] LLM analysis failed: {e}")
+                    self._fallback_absorb(user_text, last_question)
+            else:
+                # No LLM - use fallback
+                self._fallback_absorb(user_text, last_question)
             
             # DEBUG: Print vector state after update
             new_scores = self.person.as_dict()
@@ -459,15 +601,30 @@ Your next question:"""
                               if abs(old_scores[k] - new_scores[k]) > 1.0}
             if changed_criteria:
                 print(f"[absorb] Vector updated: {len(changed_criteria)} criteria changed")
-                for k, (old, new) in list(changed_criteria.items())[:3]:  # Show top 3 changes
+                for k, (old, new) in list(changed_criteria.items())[:5]:  # Show top 5 changes
                     print(f"  {k}: {old:.1f} → {new:.1f} (Δ{new-old:+.1f})")
+            else:
+                print(f"[absorb:warn] No criteria changed (answer may be too vague)")
             
             if not hasattr(self.person, "scores") or not isinstance(self.person.scores, dict):
                 self.person.scores = {k: 50.0 for k in _KEYS}
             return True
         except Exception as e:
             print(f"[absorb:error] {e}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def _fallback_absorb(self, user_text: str, last_question: str):
+        """Fallback method when LLM not available - uses person_embeddings.py logic."""
+        update_person_profile(
+            self.person,
+            question_id=last_question,
+            answer_text=user_text,
+            history_text="",
+            weight=1.0,
+            temperature=0.0,
+        )
 
     # ---------- recommendations ----------
     def transition_to_recommendations(self) -> str:
@@ -501,7 +658,14 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
         print(f"[recommendations] Person vector: {len(self.person.as_dict())} criteria")
         
         self.recommender.bind(self.majors)
-        recs = self.recommender.recommend_final(top_k=top_k, bagrut_json=self.bagrut_json)
+        
+        # Combine all interview answers for field detection
+        interview_text = " ".join(self.all_interview_answers)
+        recs = self.recommender.recommend_final(
+            top_k=top_k, 
+            bagrut_json=self.bagrut_json,
+            interview_text=interview_text
+        )
         
         print(f"[recommendations] Got {len(recs)} recommendations")
         if recs:
@@ -522,13 +686,21 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
             # Translate "Match" to target language
             match_word = _ui_tr().tr(self.ui_language, "Match")
             
-            # Format: "1. Computer Science (85% Match)\n   Strong programming skills align with your Math strength."
-            lines.append(f"{i}. {major_name} ({int(score)}% {match_word})")
+            # Format: "1. Computer Science (85.2% Match)\n   Strong programming skills align with your Math strength."
+            lines.append(f"{i}. {major_name} ({score:.1f}% {match_word})")
             if rationale:
                 # Limit rationale to first sentence for brevity
                 first_sentence = rationale.split('.')[0].strip()
                 if first_sentence:
                     lines.append(f"   {first_sentence}.")
+        
+        # Add follow-up question about viewing eligibility/courses
+        lines.append("")  # Blank line for spacing
+        follow_up = _ui_tr().tr(
+            self.ui_language,
+            "Would you like to see the eligibility requirements or sample courses for any of these majors?"
+        )
+        lines.append(follow_up)
         
         return "\n".join(lines)
 
@@ -538,7 +710,12 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
 
     def recommend_final(self, *, top_k: int = 3) -> List[Dict[str, Any]]:
         self.recommender.bind(self.majors)
-        return self.recommender.recommend_final(top_k=top_k, bagrut_json=self.bagrut_json)
+        interview_text = " ".join(self.all_interview_answers)
+        return self.recommender.recommend_final(
+            top_k=top_k, 
+            bagrut_json=self.bagrut_json,
+            interview_text=interview_text
+        )
 
     # ---------- majors I/O ----------
     def load_majors_metadata(self, path: str) -> int:

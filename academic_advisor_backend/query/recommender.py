@@ -47,20 +47,20 @@ class Recommender:
 
     def __init__(
         self,
-        *,
-        person: PersonProfile,
         majors: List[Dict[str, Any]],
-        ui_language: str,
-        llm: Optional[ChatGoogleGenerativeAI] = None,
-        w_cosine: float = 0.45,
-        w_rubric_align: float = 0.35,
-        w_bagrut_align: float = 0.20,
-        eligibility_penalty: float = 0.10,
+        person,
+        bagrut_json=None,
+        *,
+        w_cosine: float = 0.10,        # Reduced to 0.10 - cosine treats all criteria equally (unwanted)
+        w_rubric_align: float = 0.70,  # Increased to 0.70 - WEIGHTED rubric (5x tech, 0.3x social, 0.01x lang) should dominate
+        w_bagrut_align: float = 0.20,  # Reduced to 0.20 - bagrut subject match secondary
+        eligibility_penalty: float = 0.03, # Reduced from 0.15 to 0.03 - eligibility should influence but not eliminate majors (students can do prep year)
     ):
         self.person = person
         self.majors = majors or []
-        self.ui_language = ui_language
-        self.llm = llm
+        self.bagrut_json = bagrut_json
+        self.ui_language = "en"  # Default, can be set via set_language()
+        self.llm = None  # Optional, can be set via set_llm()
         self._keys = get_criteria_keys()
         # Build person vector lazily to avoid touching person.scores at init
         self._pvec: Optional[np.ndarray] = None
@@ -73,35 +73,53 @@ class Recommender:
     # ---- language / binding -------------------------------------------------
     def set_language(self, lang: str):
         self.ui_language = lang or self.ui_language
+    
+    def set_llm(self, llm):
+        """Set the LLM for generating rationales."""
+        self.llm = llm
 
     def bind(self, majors: List[Dict[str, Any]]):
         self.majors = majors or []
 
     # ---- internal: safe scores + lazy person vector -------------------------
     def _get_scores_dict(self) -> Dict[str, float]:
-        # Prefer an explicit scores dict if someone attached one
-        if hasattr(self.person, "scores") and isinstance(self.person.scores, dict):
-            return self.person.scores
-
-        # PersonProfile exposes as_dict()
+        # PersonProfile exposes as_dict() - USE THIS FIRST
         if hasattr(self.person, "as_dict") and callable(self.person.as_dict):
             try:
                 d = self.person.as_dict()
-                if isinstance(d, dict):
+                if isinstance(d, dict) and d:
                     return d
             except Exception:
                 pass
 
-        # Fallback: neutral 50s per key
+        # Legacy fallback: explicit scores dict (DEPRECATED - PersonProfile uses self.vector)
+        if hasattr(self.person, "scores") and isinstance(self.person.scores, dict):
+            return self.person.scores
+
+        # Final fallback: neutral 50s per key
         return {k: 50.0 for k in self._keys}
 
 
     def _ensure_person_vec(self) -> np.ndarray:
-        if self._pvec is not None:
-            return self._pvec
+        """
+        Build person vector from PersonProfile.as_dict().
+        IMPORTANT: Returns values in [0-100] range (NOT normalized to 0-1)!
+        This matches the major vectors which are also in [0-100] range.
+        """
+        # ALWAYS refresh from person.as_dict() to get latest interview updates!
+        # (removed caching - Bug #3 fix)
         scores = self._get_scores_dict()
-        vals = [max(0.0, min(100.0, float(scores.get(k, 50.0)))) / 100.0 for k in self._keys]
+        # Keep values in 0-100 range (DO NOT normalize to 0-1)
+        vals = [max(0.0, min(100.0, float(scores.get(k, 50.0)))) for k in self._keys]
         self._pvec = np.array(vals, dtype=float)
+        
+        # DEBUG: Show ALL scores to debug missing updates
+        print(f"[_ensure_person_vec:debug] ALL SCORES from person.as_dict():")
+        sorted_scores = sorted(scores.items(), key=lambda x: -x[1])
+        for k, v in sorted_scores:
+            print(f"  {k}: {v:.1f}")
+        print(f"[_ensure_person_vec:debug] Vector average: {np.mean(self._pvec):.1f} (should be 0-100 range)")
+        
         return self._pvec
 
     # ---- similarity & blends -----------------------------------------------
@@ -112,9 +130,58 @@ class Recommender:
         return float(np.dot(a, b) / (na * nb))
 
     def _rubric_align(self, v: np.ndarray) -> float:
+        """
+        Calculate WEIGHTED rubric alignment.
+        Technical criteria get highest weight (5x).
+        Social/psychological criteria get reduced weight (0.3x) to prevent 
+        nursing/healthcare from ranking #1 for tech-interested students.
+        Language proficiency is essentially ignored (0.01x).
+        """
         p = self._ensure_person_vec()
-        d = np.abs(p - v).mean()
-        return max(0.0, 1.0 - d)
+        # Normalize both vectors to [0-1] range
+        p_norm = p / 100.0
+        v_norm = v / 100.0
+        
+        # Define criteria weights (aligned with get_criteria_keys() order)
+        criteria_keys = get_criteria_keys()
+        weights = np.ones(len(criteria_keys))  # Default weight = 1.0
+        
+        # HIGH PRIORITY (5x weight): Core technical/analytical skills
+        high_priority = [
+            'data_analysis', 'quantitative_reasoning', 'logical_problem_solving',
+            'pattern_recognition', 'systems_thinking', 'theoretical_patience',
+            'attention_to_detail'
+        ]
+        
+        # REDUCED (0.3x weight): Social/psychological traits (should be interview-driven)
+        # These get high Bagrut seed but shouldn't dominate matching
+        social_psychological = [
+            'social_sensitivity', 'teamwork', 'communication_mediation',
+            'psychological_interest', 'ethical_awareness', 'leadership'
+        ]
+        
+        # IGNORE (0.01x weight): Language proficiency should NOT affect major matching
+        low_priority = [
+            'hebrew_proficiency', 'english_proficiency',
+            'hebrew_expression', 'english_expression'
+        ]
+        
+        for i, key in enumerate(criteria_keys):
+            if key in high_priority:
+                weights[i] = 5.0  # Technical skills are 5x more important
+            elif key in social_psychological:
+                weights[i] = 0.3  # Social traits reduced (interview should drive these)
+            elif key in low_priority:
+                weights[i] = 0.01  # Language effectively ignored (500x less important)
+        
+        # Calculate WEIGHTED mean absolute difference
+        weighted_diff = np.abs(p_norm - v_norm) * weights
+        d = weighted_diff.sum() / weights.sum()  # Normalize by total weight
+        
+        # Convert distance to similarity (1.0 = perfect match, 0.0 = max difference)
+        similarity = max(0.0, 1.0 - d)
+        
+        return similarity
 
     def _bagrut_align(self, v: np.ndarray) -> float:
         # Dampened reuse of rubric alignment to reflect Bagrut-informed tendencies
@@ -122,21 +189,61 @@ class Recommender:
         return math.sqrt(max(0.0, ra))
 
     def _blend(self, v: np.ndarray) -> float:
+        """
+        Calculate weighted blend of similarity metrics.
+        Returns score in PERCENTAGE (0-100) range, not 0-1!
+        """
         p = self._ensure_person_vec()
         c = self._cosine(p, v)
         r = self._rubric_align(v)
         b = self._bagrut_align(v)
-        return self.w_cosine * c + self.w_rubric_align * r + self.w_bagrut_align * b
+        
+        # Calculate weighted blend (0-1 range)
+        blend_normalized = self.w_cosine * c + self.w_rubric_align * r + self.w_bagrut_align * b
+        
+        # Convert to percentage (0-100 range)
+        blend_percentage = blend_normalized * 100.0
+        
+        return blend_percentage
 
     def _rank(self) -> List[Tuple[int, float]]:
+        """
+        Rank all majors by blend score (0-100 percentage).
+        DEBUG: Prints detailed breakdown for ALL majors.
+        """
         scored: List[Tuple[int, float]] = []
         p = self._ensure_person_vec()
+        
+        print(f"\n{'='*80}")
+        print(f"[_rank] DETAILED SIMILARITY CALCULATIONS FOR ALL MAJORS")
+        print(f"Weights: cosine={self.w_cosine:.2f}, rubric={self.w_rubric_align:.2f}, bagrut={self.w_bagrut_align:.2f}")
+        print(f"{'='*80}\n")
+        
         for i, m in enumerate(self.majors):
             vec = np.array(m.get("vector", []), dtype=float)
             if vec.size != p.size:
                 continue
-            scored.append((i, self._blend(vec)))
+            
+            # Calculate all components (0-1 range)
+            c = self._cosine(p, vec)
+            r = self._rubric_align(vec)
+            b = self._bagrut_align(vec)
+            
+            # Blend returns PERCENTAGE (0-100)
+            blend_percentage = self._blend(vec)
+            
+            # Log ALL majors with basic info
+            major_name = m.get('original_name', m.get('english_name', f'Major_{i}'))[:50]
+            print(f"[{len(scored)+1:2d}] {major_name:50s} Score={blend_percentage:5.1f}% (cos={c:.3f}, rub={r:.3f}, bag={b:.3f})")
+            
+            scored.append((i, blend_percentage))
+        
         scored.sort(key=lambda t: t[1], reverse=True)
+        
+        print(f"\n{'='*80}")
+        print(f"[_rank] Ranked {len(scored)} majors")
+        print(f"{'='*80}\n")
+        
         return scored
 
     # ---- LLM helpers (language via prompt) ----------------------------------
@@ -191,7 +298,15 @@ Your explanation in {self.ui_language}:"""
             ))
         return [asdict(x) for x in out]
 
-    def recommend_final(self, top_k: int = 3, bagrut_json: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def recommend_final(self, top_k: int = 3, bagrut_json: Optional[Dict[str, Any]] = None, interview_text: str = "") -> List[Dict[str, Any]]:
+        """
+        Generate final recommendations with eligibility checks.
+        
+        Args:
+            top_k: Number of recommendations to return
+            bagrut_json: Bagrut data for eligibility checking
+            interview_text: Combined text from interview answers for field detection
+        """
         # DEBUG: Show person vector state
         person_scores = self._get_scores_dict()
         top_person_scores = sorted(person_scores.items(), key=lambda x: -x[1])[:5]
@@ -207,12 +322,51 @@ Your explanation in {self.ui_language}:"""
             m = self.majors[idx]
             print(f"  {m.get('original_name', 'Unknown')}: {base:.3f}")
         
+        # FIELD-BASED RERANKING: Detect explicit field mentions and boost/penalize accordingly
+        field_adjustments = self._detect_field_preferences(interview_text)
+        if field_adjustments:
+            print(f"\n[recommend_final:field_boost] Detected field preferences from interview:")
+            for field, boost in field_adjustments.items():
+                print(f"  {field}: {boost:+.1f}%")
+        
+        # CHECK FOR NON-TECH STUDENT: If no technical subjects in Bagrut AND no tech mentions,
+        # apply penalty to tech majors to avoid recommending CS/IS to language-focused students
+        has_tech_subjects = self._check_technical_subjects_from_bagrut(bagrut_json or {})
+        has_tech_interest = field_adjustments.get('tech', 0) > 0  # Positive tech boost = interest
+        apply_tech_penalty = (not has_tech_subjects) and (not has_tech_interest)
+        
+        if apply_tech_penalty:
+            print(f"\n[recommend_final:tech_penalty] Student has NO tech subjects + NO tech interest → penalizing tech majors by -20%")
+        
         adjusted: List[Tuple[int, float, Dict[str, Any]]] = []
         for idx, base in prelim:
             m = self.majors[idx]
             ok, msgs = eligibility_flags_from_rules(m.get("eligibility_rules") or {}, bagrut_json or {})
             penalty = self.eligibility_penalty if (not ok) else 0.0
-            adjusted.append((idx, max(0.0, base - penalty), {"ok": ok, "msgs": msgs}))
+            
+            # Apply field-based adjustment
+            field_boost = self._calculate_field_boost(m, field_adjustments)
+            
+            # Apply tech penalty if student is non-tech
+            tech_penalty = 0.0
+            if apply_tech_penalty and self._is_tech_major(m):
+                tech_penalty = 20.0  # -20% penalty for tech majors
+            
+            # Calculate final score (NO CAP - let natural distribution show)
+            # High scores (95+) are rare and indicate exceptional fit
+            final_score = max(0.0, base - penalty + field_boost - tech_penalty)
+            
+            # DEBUG: Show calculation for top majors
+            major_name = m.get('original_name', '')
+            if idx < 5:  # Log first 5
+                print(f"\n[recommend_final] {major_name[:40]}")
+                print(f"  Base: {base:.1f}%")
+                print(f"  Eligibility penalty: -{penalty:.1f}%")
+                print(f"  Field boost: {field_boost:+.1f}%")
+                print(f"  Tech penalty: -{tech_penalty:.1f}%")
+                print(f"  Final: {final_score:.1f}%")
+            
+            adjusted.append((idx, final_score, {"ok": ok, "msgs": msgs}))
         adjusted.sort(key=lambda t: t[1], reverse=True)
 
         results: List[FinalRec] = []
@@ -231,3 +385,130 @@ Your explanation in {self.ui_language}:"""
                 eligibility_summary={"pass": el["ok"], "notes": el["msgs"]}
             ))
         return [asdict(x) for x in results]
+    
+    def _detect_field_preferences(self, interview_text: str) -> Dict[str, float]:
+        """
+        Detect explicit field mentions in interview text.
+        Returns dict of {field_category: boost_percentage}.
+        
+        Categories:
+        - business: כלכלה, עסקים, ניהול, שיווק
+        - tech: מחשב, תכנות, אלגוריתם, נתונים
+        - health: סיעוד, רפואה, בריאות
+        - education: חינוך, הוראה, ייעוץ
+        """
+        if not interview_text:
+            return {}
+        
+        text_lower = interview_text.lower()
+        preferences = {}
+        
+        # Business/Economics keywords
+        business_keywords = ['כלכלה', 'עסק', 'ניהול', 'שיווק', 'מנהל', 'economics', 'business', 'management']
+        if any(kw in text_lower for kw in business_keywords):
+            preferences['business'] = 8.0   # +8% boost (realistic, not excessive)
+            preferences['tech'] = -6.0      # -6% penalty for pure tech
+            preferences['health'] = -5.0    # -5% penalty for health
+        
+        # Tech/CS keywords (if mentioned MORE than business)
+        tech_keywords = ['מחשב', 'תכנות', 'אלגוריתם', 'נתונים', 'תוכנה', 'computer', 'programming', 'algorithm', 'software', 
+                        'אלקטרוניקה', 'electronics', 'מערכות', 'systems']
+        tech_count = sum(1 for kw in tech_keywords if kw in text_lower)
+        business_count = sum(1 for kw in business_keywords if kw in text_lower)
+        
+        if tech_count > business_count:
+            preferences['tech'] = 8.0        # +8% boost (realistic)
+            preferences['business'] = -6.0   # -6% penalty for business
+            preferences['health'] = -8.0     # -8% penalty for health
+        
+        # Health/Nursing keywords
+        health_keywords = ['סיעוד', 'אחיות', 'רפואה', 'בריאות', 'חולה', 'מטופל', 'עזרה לאנשים', 'nursing', 'health', 'medicine', 'patient', 'care']
+        has_health_interest = any(kw in text_lower for kw in health_keywords)
+        
+        if has_health_interest:
+            preferences['health'] = 8.0   # +8% boost (realistic)
+            preferences['tech'] = -8.0    # -8% penalty for tech
+            preferences['business'] = -5.0  # -5% penalty for business
+        
+        # ANTI-HEALTH: If student shows tech/office interest WITHOUT health keywords, strongly penalize health majors
+        office_keywords = ['משרד', 'office', 'מחשב', 'computer', 'אלקטרוניקה', 'electronics']
+        has_office_tech_interest = any(kw in text_lower for kw in office_keywords)
+        
+        if has_office_tech_interest and not has_health_interest:
+            # Student wants office/tech work, NOT patient care
+            # Apply strong penalty UNLESS student explicitly showed health interest
+            current_health = preferences.get('health', 0)
+            if current_health <= 0:  # Only apply if health is not positively boosted
+                preferences['health'] = -15.0  # Strong penalty - health doesn't fit at all
+                print(f"[recommend_final:health_penalty] Student shows office/tech interest WITHOUT health keywords → -15% penalty for health majors")
+        
+        # Education/Counseling keywords
+        education_keywords = ['חינוך', 'הוראה', 'ייעוץ', 'למידה', 'education', 'teaching', 'counseling']
+        if any(kw in text_lower for kw in education_keywords):
+            preferences['education'] = 8.0  # +8% boost (realistic)
+            preferences['tech'] = -6.0      # -6% penalty for tech
+        
+        return preferences
+    
+    def _check_technical_subjects_from_bagrut(self, bagrut_json: Dict[str, Any]) -> bool:
+        """
+        Check if student has ANY technical subjects in Bagrut.
+        Technical subjects: Mathematics, Physics, Computer Science, Chemistry
+        
+        Returns True if found, False otherwise.
+        """
+        subjects = bagrut_json.get("subjects", [])
+        if not subjects:
+            return False
+        
+        technical_subjects = ['מתמטיקה', 'פיזיקה', 'מדעי המחשב', 'כימיה',
+                             'mathematics', 'physics', 'computer science', 'chemistry']
+        
+        for subj in subjects:
+            name = (subj.get("name", "") or "").strip().lower()
+            if any(tech in name for tech in technical_subjects):
+                # Also check if grade is decent (above 60)
+                grade = subj.get("grade", 0)
+                if grade >= 60:
+                    return True
+        
+        return False
+    
+    def _is_tech_major(self, major: Dict[str, Any]) -> bool:
+        """
+        Check if a major is tech-related based on name keywords.
+        """
+        major_name = (major.get('original_name', '') + ' ' + major.get('english_name', '')).lower()
+        tech_keywords = ['מחשב', 'מידע', 'טכנולוגי', 'computer', 'information', 'technology', 'software', 'data']
+        return any(kw in major_name for kw in tech_keywords)
+    
+    def _calculate_field_boost(self, major: Dict[str, Any], field_preferences: Dict[str, float]) -> float:
+        """
+        Calculate boost/penalty for a major based on detected field preferences.
+        
+        Maps majors to categories based on name keywords.
+        """
+        if not field_preferences:
+            return 0.0
+        
+        major_name = (major.get('original_name', '') + ' ' + major.get('english_name', '')).lower()
+        boost = 0.0
+        
+        # Tech majors
+        if any(kw in major_name for kw in ['מחשב', 'מידע', 'טכנולוגי', 'computer', 'information', 'technology', 'software']):
+            boost += field_preferences.get('tech', 0.0)
+        
+        # Business majors
+        elif any(kw in major_name for kw in ['ניהול', 'כלכלה', 'עסק', 'management', 'economics', 'business']):
+            boost += field_preferences.get('business', 0.0)
+        
+        # Health majors
+        elif any(kw in major_name for kw in ['אחיות', 'סיעוד', 'בריאות', 'nursing', 'health']):
+            boost += field_preferences.get('health', 0.0)
+        
+        # Education majors
+        elif any(kw in major_name for kw in ['חינוך', 'ייעוץ', 'למידה', 'education', 'counseling', 'learning']):
+            boost += field_preferences.get('education', 0.0)
+        
+        return boost
+

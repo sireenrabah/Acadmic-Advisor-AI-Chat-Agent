@@ -43,9 +43,18 @@ class PersonProfile:
                 self._seed_source = "neutral"
 
         # Confidence:
-        # - If we seeded from Bagrut → medium-high confidence globally (0.6)
+        # - If we seeded from Bagrut → check if ANY technical subjects present
+        #   Technical subjects: math, physics, computer science
+        #   If ONLY languages (english, arabic, hebrew) → lower confidence to 0.35
+        #   If has technical subjects → medium-high confidence (0.6)
         # - Else → low baseline (0.3)
-        base_conf = 0.6 if self._seed_source == "bagrut" else 0.3
+        if self._seed_source == "bagrut":
+            # Check if student has ANY technical Bagrut scores
+            has_technical = self._has_technical_subjects(bagrut_sig)
+            # Language-only students: lower confidence so interview carries more weight
+            base_conf = 0.6 if has_technical else 0.35
+        else:
+            base_conf = 0.3
         self.confidence: List[float] = [base_conf] * len(criteria_keys)
 
         # Keep signals if you want explanations elsewhere (optional)
@@ -53,6 +62,41 @@ class PersonProfile:
 
         # Turn-by-turn log
         self.history: List[Dict[str, Any]] = []  # {"key","delta","new_score","note",...}
+
+    # --- Helper methods ---
+    def _has_technical_subjects(self, bagrut_sig: Dict[str, Any]) -> bool:
+        """
+        Check if Bagrut signals contain ANY technical subjects (math, physics, comp sci).
+        Returns True if student has technical subjects, False if only languages.
+        
+        Technical criteria that indicate STEM interest:
+        - data_analysis (from math/physics)
+        - quantitative_reasoning (from math)
+        - logical_problem_solving (from math/comp sci)
+        - pattern_recognition (from math)
+        - systems_thinking (from physics/comp sci)
+        
+        Language criteria (should NOT count as technical):
+        - hebrew_proficiency, english_proficiency, arabic_proficiency
+        - hebrew_expression, english_expression
+        - communication_mediation, social_sensitivity
+        """
+        technical_keys = [
+            "data_analysis",
+            "quantitative_reasoning", 
+            "logical_problem_solving",
+            "pattern_recognition",
+            "systems_thinking",
+            "theoretical_patience"
+        ]
+        
+        # Check if ANY technical criterion is significantly above baseline (55+)
+        for key in technical_keys:
+            score = bagrut_sig.get(key, 50.0)
+            if score >= 55.0:  # At least moderate technical score from Bagrut
+                return True
+        
+        return False
 
     # --- Convenience accessors ---
     def as_dict(self) -> Dict[str, float]:
@@ -108,12 +152,15 @@ class PersonProfile:
         temp = max(0.0, min(1.0, float(temp)))
 
         # EMA weight: lower confidence → bigger step; scale by external weight
-        # Keep steps modest so Bagrut remains the anchor.
-        base_w = 0.35 + 0.40 * (1.0 - conf)  # range ~[0.35, 0.75)
+        # Increased base weight to give more influence to explicit interview statements
+        base_w = 0.50 + 0.40 * (1.0 - conf)  # range ~[0.50, 0.90) - stronger updates
         w = base_w * ext_w
 
         old = self.vector[i]
         self.vector[i] = (1.0 - w) * old + w * new_score
+        
+        # DEBUG: Verify update actually changed the vector
+        print(f"[update_from_answer:debug] {key}: {old:.1f} → {self.vector[i]:.1f} (w={w:.3f}, new_score={new_score:.1f})")
 
         # Confidence bump: smaller if temperature is high or ext_weight is small
         bump = 0.12 * ext_w * (1.0 - 0.5 * temp)

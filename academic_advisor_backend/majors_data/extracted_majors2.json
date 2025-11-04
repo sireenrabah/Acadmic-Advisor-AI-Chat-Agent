@@ -34,7 +34,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -75,7 +75,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -116,7 +116,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -157,7 +157,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -240,7 +240,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -281,7 +281,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -317,7 +317,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -353,7 +353,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -391,7 +391,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -426,7 +426,7 @@
     ],
     "eligibility_raw": "תנאי קבלה:  \n▪ בחינת הרקע המקצועי של המועמד והבסיס לכוונות המועמד ללמוד בתכנית. \n▪ תעודת תואר ראשון בציון ממוצע של80 לפחות. \n▪ חובת הצגת רמת פטור מלימודי אנגלית \n▪ :פטורים מחובה זו \no סטודנטים שסיימו את לימודי התואר הראשון במוסד אקדמי ישראלי. \no סטודנטים שעמדו במבחן אמיר בציון234 או בחלק האנגלית במבחן\nהפסיכומטרי בציון 134. . \no מועמדים אשר סיימו תואר ראשון באוניברסיטה אשר הלימודים בה התקיימו\nבשפה האנגלית. \no סטודנטים אשר למדו במוסדות אקדמיים מחו”ל, לא בשפה האנגלית, יחויבו\nבהצגת אחד מהתנאים הרשומים מעלה .",
     "eligibility_rules": {
-      "psychometric_min": 0,
+      "psychometric_min": 134,
       "bagrut_avg_min": 80,
       "english_requirement": true,
       "amiram_or_amir_min": 234,
@@ -464,7 +464,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -500,7 +500,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -536,7 +536,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
@@ -572,7 +572,7 @@
     "eligibility_raw": "תנאי קבלה:  \n▪  תעודת בגרות בציון ממוצע של80   ומעלה או מסיימי מכינה קדם אקדמית ייעודית בציון\n80  ומעלה או זכאות לתעודת בגרות ופסיכומטרי של550  לפחות. \n▪  ניתן לקבל עד10%   תלמידים שאינם עונים על תנאי הקבלה במלואם וזאת על פי\nהחלטת וועדת הסטטוס המוסדית.",
     "eligibility_rules": {
       "bagrut_certificate_required": true,
-      "psychometric_min": 0,
+      "psychometric_min": 550,
       "bagrut_avg_min": 80,
       "exceptions_quota_10pct": true
     },
