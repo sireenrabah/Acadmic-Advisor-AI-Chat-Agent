@@ -21,3 +21,4 @@ pillow
 # env
 python-dotenv
 
+

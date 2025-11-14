@@ -85,6 +85,7 @@ class HybridRAG:
     def __init__(self, ui_language: Optional[str] = None, llm: Optional[ChatGoogleGenerativeAI] = None):
         self.ui_language: Optional[str] = ui_language
         self.llm = llm
+        self.degree_filter: str = "both"  # Default: show all degrees
 
         # PersonProfile uses self.vector (not self.scores)
         self.person = PersonProfile(criteria_keys=_KEYS, llm=llm)
@@ -199,15 +200,24 @@ class HybridRAG:
         # 1. GREETING (simple welcome, NO Bagrut mention yet)
         if self.llm:
             try:
-                greeting_prompt = f"""You are an academic advisor. CRITICAL: Respond ONLY in {self.ui_language}.
+                # Build language-specific example first
+                example_greeting = {
+                    "he": "שלום! שמחה לראות אותך כאן.",
+                    "ar": "مرحباً! سعيد برؤيتك هنا.",
+                    "en": "Hi there! Great to see you."
+                }.get(self.ui_language, "Hi there! Great to see you.")
+                
+                greeting_prompt = f"""LANGUAGE: {self.ui_language.upper()}
+You must respond ONLY in {self.ui_language} language.
 
-Write a warm 1-sentence greeting that welcomes the student. 
-Do NOT mention grades or subjects yet.
-Max 12 words.
+Example greeting in {self.ui_language}: "{example_greeting}"
 
-Example in {self.ui_language}: {self._get_example_phrase()[:30]}
+Task: Write a warm 1-sentence welcome greeting for a student.
+- Do NOT mention grades or subjects
+- Max 12 words
+- MUST be in {self.ui_language}
 
-Your greeting:"""
+Your {self.ui_language} greeting:"""
                 greeting = self.llm.invoke(greeting_prompt).content.strip()
             except Exception:
                 greeting = _ui_tr().tr(self.ui_language, "Hi there! Welcome, it's great to see you.")
@@ -226,18 +236,27 @@ Your greeting:"""
         
         if self.llm:
             try:
-                bagrut_prompt = f"""You are an academic advisor. CRITICAL: Respond ONLY in {self.ui_language}.
+                # Build language-specific example
+                example_bagrut = {
+                    "he": f"כל הכבוד על הציונים המרשימים! ראיתי את הציון שלך ב{top_subjs[0][0]} ({top_subjs[0][1]}) ו{top_subjs[1][0]} ({top_subjs[1][1]}) - הישגים מעולים!",
+                    "ar": f"تهانينا على درجاتك المذهلة! لاحظت درجتك في {top_subjs[0][0]} ({top_subjs[0][1]}) و{top_subjs[1][0]} ({top_subjs[1][1]}) - إنجازات رائعة!",
+                    "en": f"Congratulations on impressive grades! I saw your {top_subjs[0][0]} ({top_subjs[0][1]}) and {top_subjs[1][0]} ({top_subjs[1][1]}) - excellent achievements!"
+                }.get(self.ui_language, f"Impressive: {top_5_text}")
+                
+                bagrut_prompt = f"""LANGUAGE: {self.ui_language.upper()}
+You must respond ONLY in {self.ui_language} language.
 
-The student's top 5 Bagrut results are: {top_5_text}
+Example in {self.ui_language}: "{example_bagrut}"
 
-Write 1-2 sentences that:
-- Acknowledge their achievements (mention at least 2-3 subjects with grades)
+Student's top 5 results: {top_5_text}
+
+Task: Write 1-2 sentences that:
+- Acknowledge their achievements (mention 2-3 subjects with grades)
 - Show encouragement
 - Max 30 words
+- MUST be in {self.ui_language}
 
-Example in {self.ui_language}: {self._get_example_phrase()}
-
-Your acknowledgment:"""
+Your {self.ui_language} acknowledgment:"""
                 bagrut_summary = self.llm.invoke(bagrut_prompt).content.strip()
             except Exception:
                 bagrut_summary = _ui_tr().tr(self.ui_language, f"Impressive achievements: {top_5_text}! These strong results show dedication.")
@@ -250,18 +269,28 @@ Your acknowledgment:"""
         
         if self.llm:
             try:
-                q_prompt = f"""You are an academic advisor. CRITICAL: Respond ONLY in {self.ui_language}.
+                # Build language-specific example
+                example_question = {
+                    "he": f"קיבלת {top_grade} ב{top_name_loc} ({top_units} יחידות) - האם זה באמת מעניין אותך או שזה רק יצא לך בקלות?",
+                    "ar": f"حصلت على {top_grade} في {top_name_loc} ({top_units} وحدات) - هل تستمتع به حقاً أم أنه كان سهلاً فقط؟",
+                    "en": f"You scored {top_grade} in {top_name_loc} ({top_units} units) - do you genuinely enjoy it, or did it just come naturally?"
+                }.get(self.ui_language, f"You scored {top_grade} in {top_name_loc} - do you enjoy it?")
+                
+                q_prompt = f"""LANGUAGE: {self.ui_language.upper()}
+You must respond ONLY in {self.ui_language} language.
 
-Student's top subject: {top_name_loc} ({top_grade}, {top_units} {units_word})
+Example in {self.ui_language}: "{example_question}"
 
-Ask ONE conversational question that:
+Student's top subject: {top_name_loc} (grade: {top_grade}, units: {top_units})
+
+Task: Ask ONE conversational question that:
 - Mentions the grade and units naturally
 - Probes if they genuinely ENJOY the subject (not just excel at it)
-- Feels like a human advisor
+- Sounds like a human advisor
+- Max 25 words
+- MUST be in {self.ui_language}
 
-Example in {self.ui_language}: "קיבלת 100 בהיסטוריה (3 יחידות) - האם זה באמת מעניין אותך או שזה רק יצא לך בקלות?"
-
-Your question (1 sentence):"""
+Your {self.ui_language} question:"""
                 first_q = self.llm.invoke(q_prompt).content.strip()
             except Exception:
                 first_q = _ui_tr().tr(self.ui_language, f"You scored {top_grade} in {top_name_loc} ({top_units} {units_word}) - do you genuinely enjoy it, or did it just come naturally?")
@@ -271,7 +300,7 @@ Your question (1 sentence):"""
         return {
             "greeting": greeting,
             "bagrut_summary": bagrut_summary,
-            "first_question": f"QUESTION: {first_q}"  # ADD PREFIX for frontend parsing
+            "first_question": first_q  # No prefix needed - frontend strips it anyway
         }
 
     # ---------- first question (LEGACY - kept for backward compatibility) ----------
@@ -347,22 +376,22 @@ Your question (1 sentence):"""
         
         REMOVED hard-coded keyword detection - let LLM's question strategy handle pacing.
         """
-        # Stop after 7 turns max (gives time for work environment questions)
-        if turn_count >= 7:
+        # Stop after 15 turns max (longer conversation for better profiling)
+        if turn_count >= 15:
             return True
         
         # Stop if student is being repetitive (early sign of boredom)
-        if turn_count >= 4 and self._detect_repetitive_answers(history):
+        if turn_count >= 8 and self._detect_repetitive_answers(history):
             return True
         
         # Stop if vector has converged (no significant changes)
-        if turn_count >= 5 and self._check_vector_convergence():
+        if turn_count >= 10 and self._check_vector_convergence():
             return True
         
         # Stop if we have high confidence across criteria
         if hasattr(self.person, 'confidence'):
             avg_confidence = sum(self.person.confidence) / len(self.person.confidence)
-            if turn_count >= 5 and avg_confidence >= 0.70:
+            if turn_count >= 10 and avg_confidence >= 0.80:
                 return True
         
         return False
@@ -383,7 +412,7 @@ Your question (1 sentence):"""
             else:
                 q = _ui_tr().tr(self.ui_language, "Please upload your Bagrut so I can tailor questions to your strengths.")
             self.last_question_text = q
-            return f"QUESTION: {q}"  # ADD PREFIX
+            return q  # No prefix needed
 
         recent_tail = " • ".join(asked_questions[-3:]) if asked_questions else "none"
         subj_phrase, top = _format_top_subjects_loc(self.bagrut_json, 3, self.ui_language or "en")
@@ -397,10 +426,19 @@ Your question (1 sentence):"""
         conversation_context = self._build_conversation_context(history, top)
 
         if self.llm:
-            prompt = f"""You are an academic advisor speaking with a HIGH SCHOOL GRADUATE in {self.ui_language}.
-CRITICAL: Respond ONLY in {self.ui_language} language.
+            # Build language-specific example question
+            example_next_q = {
+                "he": "ראיתי שאתה חזק במתמטיקה - האם אתה מעדיף לעבוד בצוות או באופן עצמאי?",
+                "ar": "لاحظت أنك قوي في الرياضيات - هل تفضل العمل في فريق أم بشكل مستقل؟",
+                "en": "I saw you're strong in Math - do you prefer working in a team or independently?"
+            }.get(self.ui_language, "Do you prefer working alone or in teams?")
+            
+            prompt = f"""LANGUAGE: {self.ui_language.upper()}
+You must respond ONLY in {self.ui_language} language.
 
-Example phrase in {self.ui_language}: {self._get_example_phrase()}
+Example question in {self.ui_language}: "{example_next_q}"
+
+ROLE: Academic advisor for HIGH SCHOOL GRADUATE (17-18 years old)
 
 STUDENT'S TOP STRENGTHS: {subj_phrase}
 
@@ -408,44 +446,44 @@ CONVERSATION SO FAR:
 {conversation_context}
 
 IMPORTANT CONTEXT:
-- This is a YOUNG ADULT (17-18 years old) who just finished high school
+- This is a YOUNG ADULT who just finished high school
 - They DON'T know deep technical details about fields (NLP, machine learning, etc.)
-- They ARE exploring what TYPE OF WORK suits their personality and interests
+- They ARE exploring what TYPE OF WORK suits their personality
 
 YOUR QUESTIONING STRATEGY:
-Turn 1-2: Ask about their Bagrut subjects - which did they genuinely ENJOY (not just excel at)?
+Turn 1-2: Ask about Bagrut subjects - which did they genuinely ENJOY?
 Turn 3-4: Ask about WORK ENVIRONMENT preferences:
-  - Do they prefer working indoors (office/lab) or outdoors?
-  - Do they like working independently or in teams?
-  - Physical work (hands-on, building) or mental work (thinking, analyzing)?
-  - Working with people (patients, students) or with systems/data?
+  - Indoors (office/lab) or outdoors?
+  - Independently or in teams?
+  - Physical work (hands-on) or mental work (thinking)?
+  - Working with people or with systems/data?
 Turn 5-6: Ask about DAILY ACTIVITIES they find satisfying:
-  - Solving puzzles/problems vs. helping people vs. creating things?
+  - Solving puzzles vs. helping people vs. creating things?
   - Structured routine vs. varied challenges?
-  - Theory/research vs. practical applications?
 
 AVOID:
-- ❌ Technical jargon (algorithms, NLP, machine translation, data structures)
-- ❌ Research topics (they're choosing a BACHELOR'S degree, not a PhD)
-- ❌ Over-specific sub-fields (unless they bring it up first)
+- ❌ Technical jargon (algorithms, NLP, data structures)
+- ❌ Research topics (they're choosing BACHELOR'S, not PhD)
+- ❌ Over-specific sub-fields
 
 DO:
-- ✅ Ask about personality, work style, daily life preferences
-- ✅ Use concrete examples: "working in a hospital" vs. "working in an office"
-- ✅ Reference their Bagrut naturally: "You did well in Math - do you like solving puzzles?"
+- ✅ Ask about personality, work style, preferences
+- ✅ Use concrete examples: "hospital" vs. "office"
+- ✅ Reference their Bagrut naturally
 
 RECENTLY ASKED (do NOT repeat):
 {chr(10).join(f"- {q}" for q in (asked_questions[-2:] if len(asked_questions) >= 2 else []))}
 
-SYSTEM HINT: {hint or "none"}
+HINT: {hint or guidance}
 
 Requirements:
 - ONE question only
 - 1-2 sentences max
 - Natural conversational {self.ui_language}
-- Age-appropriate (high school graduate level)
+- Age-appropriate (high school level)
+- MUST be in {self.ui_language}
 
-Your next question:"""
+Your {self.ui_language} question:"""
             q = self.llm.invoke(prompt).content.strip()
         else:
             base = f"With {subj_phrase} in mind, pick one area to explore and why."
@@ -457,7 +495,7 @@ Your next question:"""
             q = _ui_tr().tr(self.ui_language, base)
 
         self.last_question_text = q
-        return f"QUESTION: {q}"  # ADD PREFIX for frontend parsing
+        return q  # No prefix needed
 
     # ---------- absorb ----------
     def absorb_answer(self, *, user_text: str, last_question: str) -> bool:
@@ -656,6 +694,7 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
         """
         print(f"[recommendations] Generating with {len(self.majors)} majors loaded")
         print(f"[recommendations] Person vector: {len(self.person.as_dict())} criteria")
+        print(f"[recommendations] Degree filter: {self.degree_filter}")
         
         self.recommender.bind(self.majors)
         
@@ -664,7 +703,8 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
         recs = self.recommender.recommend_final(
             top_k=top_k, 
             bagrut_json=self.bagrut_json,
-            interview_text=interview_text
+            interview_text=interview_text,
+            degree_filter=self.degree_filter  # Pass degree filter
         )
         
         print(f"[recommendations] Got {len(recs)} recommendations")
@@ -714,7 +754,8 @@ Natural advisor tone. Max 25 words. Language: {self.ui_language}"""
         return self.recommender.recommend_final(
             top_k=top_k, 
             bagrut_json=self.bagrut_json,
-            interview_text=interview_text
+            interview_text=interview_text,
+            degree_filter=self.degree_filter  # Pass degree filter
         )
 
     # ---------- majors I/O ----------

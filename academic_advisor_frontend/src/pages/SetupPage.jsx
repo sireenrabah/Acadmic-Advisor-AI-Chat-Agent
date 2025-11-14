@@ -21,6 +21,8 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [progressText, setProgressText] = useState("");
 
   // On mount: hard-reset any previous session/client-side state
   useEffect(() => {
@@ -44,16 +46,27 @@ export default function SetupPage() {
     if (psycho) form.append("psychometry", psycho);
 
     setUploading(true);
+    setProgress(30);
+    setProgressText("Uploading documents...");
+    
     try {
       const r = await fetch(`${API_BASE}/upload`, {
         method: "POST",
         body: form,
       });
+      
+      setProgress(60);
+      setProgressText("Processing documents...");
+      
       if (!r.ok) {
         throw new Error(`Upload failed (${r.status})`);
       }
       // ⬇️ Read the server's Bagrut-anchored first question if present
       const data = await r.json().catch(() => ({}));
+      
+      setProgress(80);
+      setProgressText("Documents processed!");
+      
       return data?.message || null;
     } finally {
       setUploading(false);
@@ -64,7 +77,18 @@ export default function SetupPage() {
     if (!isValid || loading) return;
     setError("");
     setLoading(true);
+    setProgress(10);
+    setProgressText("Initializing session...");
+    
     try {
+      // Simulate gradual progress
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev < 30) return prev + 2;
+          return prev;
+        });
+      }, 100);
+      
       const r = await fetch(`${API_BASE}/start`, {
         method: "POST",
         headers: {
@@ -79,6 +103,11 @@ export default function SetupPage() {
           college,
         }),
       });
+      
+      clearInterval(progressInterval);
+      setProgress(40);
+      setProgressText("Session created!");
+      
       const data = await r.json();
 
       const sessionId = data.session_id || data.id;
@@ -86,8 +115,20 @@ export default function SetupPage() {
         throw new Error("No session_id returned from /start");
       }
 
+      setProgress(50);
+      setProgressText("Uploading documents...");
+
       // Try to upload docs right now; prefer the message produced after Bagrut upload
       const bagrutMsg = await uploadDocuments(sessionId);
+
+      setProgress(80);
+      setProgressText("Processing your data...");
+      
+      // Brief pause to show progress
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setProgress(95);
+      setProgressText("Preparing your interview...");
 
       const greet = {
         role: "assistant",
@@ -107,12 +148,20 @@ export default function SetupPage() {
       localStorage.setItem("aa_degree", degree);
       localStorage.setItem("aa_college", college);
 
-      nav(`/chat/${sessionId}`);
+      setProgress(100);
+      setProgressText("Ready!");
+      
+      // Small delay to show 100% before navigating
+      setTimeout(() => {
+        nav(`/chat/${sessionId}`);
+      }, 300);
     } catch (e) {
       setError(
         e?.message ||
           "Could not start a new interview. Please check the backend (/health) and CORS."
       );
+      setProgress(0);
+      setProgressText("");
     } finally {
       setLoading(false);
     }
@@ -139,6 +188,48 @@ export default function SetupPage() {
               }}
             >
               {error}
+            </div>
+          )}
+
+          {(loading || uploading) && progress > 0 && (
+            <div
+              className="card"
+              style={{
+                marginTop: 12,
+                padding: 16,
+                borderColor: "rgba(22, 101, 52, 0.25)",
+                background: "linear-gradient(to bottom, #ffffff, #fafffe)",
+              }}
+            >
+              <div style={{ 
+                fontSize: '14px', 
+                fontWeight: 600, 
+                color: '#166534',
+                marginBottom: 10,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span>{progressText}</span>
+                <span style={{ fontSize: '13px', color: '#6b7280' }}>{progress}%</span>
+              </div>
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: 'rgba(22, 101, 52, 0.1)',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                position: 'relative'
+              }}>
+                <div style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #16a34a, #22c55e)',
+                  borderRadius: '10px',
+                  transition: 'width 0.5s ease',
+                  boxShadow: '0 0 10px rgba(34, 197, 94, 0.4)'
+                }} />
+              </div>
             </div>
           )}
 

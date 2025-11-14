@@ -1,0 +1,51 @@
+# Academic Advisor Backend - Python Requirements
+# Python 3.10+ recommended
+
+# ==================== Core Web Framework ====================
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+python-multipart==0.0.12
+
+# ==================== LLM & AI ====================
+langchain==0.3.7
+langchain-core>=0.3.15,<0.4.0
+langchain-community==0.3.7
+langchain-google-genai==2.0.4
+google-generativeai==0.8.3
+
+# ==================== Vector Store & Embeddings ====================
+# Vector store
+chromadb==0.4.22
+
+# ==================== PDF Processing ====================
+PyPDF2==3.0.1
+pdf2image==1.17.0
+pytesseract==0.3.13
+Pillow==11.0.0
+
+# ==================== Data Processing ====================
+numpy>=1.26.0,<2.0.0
+
+# ==================== Environment & Config ====================
+python-dotenv==1.0.1
+
+# ==================== Utilities ====================
+python-dateutil==2.9.0.post0
+typing-extensions==4.12.2
+
+# ==================== Additional Setup Required ====================
+# 1. Tesseract OCR (external dependency):
+#    Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#    Add to PATH: C:\Program Files\Tesseract-OCR
+#
+# 2. Poppler for pdf2image (external dependency):
+#    Windows: https://github.com/oschwartz10612/poppler-windows/releases/
+#    Add bin\ folder to PATH
+#
+# 3. Google Gemini API Key:
+#    Create .env file in academic_advisor_backend directory
+#    Add: GOOGLE_API_KEY=your_api_key_here
+#
+# 4. Install all dependencies:
+#    pip install -r requirements.txt

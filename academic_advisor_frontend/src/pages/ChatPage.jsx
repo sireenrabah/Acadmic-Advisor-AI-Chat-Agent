@@ -221,7 +221,60 @@ export default function ChatPage() {
   // Auto-scroll
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, finished]);
+  }, [messages.length, finished, loading]);
+
+  // Handle follow-up option button clicks
+  const handleOptionClick = async (option) => {
+    if (loading || !sessionId || finished) return;
+    
+    // Map option to user-friendly text (for display only)
+    const optionTexts = {
+      '1': lang === 'he' ? '1️⃣ למה זה מתאים לי?' : '1️⃣ Why is this good for me?',
+      '2': lang === 'he' ? '2️⃣ דרישות קבלה וחוסרים' : '2️⃣ Eligibility & Requirements',
+      '3': lang === 'he' ? '3️⃣ קורסים לדוגמה' : '3️⃣ Sample Courses',
+      '4': lang === 'he' ? '4️⃣ מסלולי קריירה' : '4️⃣ Career Paths'
+    };
+    
+    const text = optionTexts[option] || option;
+    const userMsg = { role: "user", text, ts: Date.now(), id: uid() };
+    const nextMsgs = [...messages, userMsg];
+    setMessages(nextMsgs);
+    localStorage.setItem("aa_session_msgs", JSON.stringify(nextMsgs));
+
+    setLoading(true);
+    setError("");
+    
+    try {
+      // Send option selection to backend
+      const r = await fetch(`${API_BASE}/turn/followup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          option: option,  // Send just the number/option code
+          majors: recommendedMajors
+        }),
+      });
+      
+      if (!r.ok) throw new Error(`followup failed: ${r.status}`);
+      const data = await r.json();
+      
+      const botMsg = {
+        role: "assistant",
+        text: data.text || data.message || "I'll provide more details soon.",
+        ts: Date.now(),
+        id: uid(),
+      };
+      
+      const finalMsgs = [...nextMsgs, botMsg];
+      setMessages(finalMsgs);
+      localStorage.setItem("aa_session_msgs", JSON.stringify(finalMsgs));
+    } catch (err) {
+      setError(err?.message || "Could not process your selection.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const send = async () => {
     const text = input.trim();
@@ -237,7 +290,34 @@ export default function ChatPage() {
     setError("");
     
     try {
-      // CHECK: If user is requesting major details after recommendations
+      // CHECK 1: If user typed ANY number after recommendations, use followup endpoint
+      // Backend will validate if the number is in valid range
+      if (/^\d+$/.test(text) && recommendedMajors.length > 0) {
+        console.log("[ChatPage] Detected followup option:", text);
+        
+        const r = await fetch(`${API_BASE}/turn/followup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            option: text,
+            majors: recommendedMajors
+          }),
+        });
+        
+        if (!r.ok) throw new Error(`followup failed: ${r.status}`);
+        const data = await r.json();
+        const aiText = data?.text || "Sorry, I couldn't process that request.";
+        
+        const aiMsg = { role: "assistant", text: aiText, ts: Date.now(), id: uid() };
+        const after = [...nextMsgs, aiMsg];
+        setMessages(after);
+        localStorage.setItem("aa_session_msgs", JSON.stringify(after));
+        setLoading(false);
+        return;
+      }
+      
+      // CHECK 2: If user is requesting major details after recommendations
       if (isMajorInfoRequest(text, recommendedMajors.length > 0)) {
         console.log("[ChatPage] Detected major info request:", text);
         console.log("[ChatPage] Available majors:", recommendedMajors);
@@ -333,7 +413,14 @@ export default function ChatPage() {
         if (content) {
           // Show the transition message + inline recommendations in chat
           const aiMsg = { role: "assistant", text: content, ts: Date.now(), id: uid() };
-          const withRecs = [...nextMsgs, aiMsg];
+          
+          // Add follow-up question with options
+          const followUpText = lang === 'he' 
+            ? 'איזו מגמה מעניינת אותך? הקלד את המספר (1, 2, או 3)'
+            : 'Which major interests you? Type the number (1, 2, or 3)';
+          const followUpMsg = { role: "assistant", text: followUpText, ts: Date.now() + 1, id: uid() };
+          
+          const withRecs = [...nextMsgs, aiMsg, followUpMsg];
           setMessages(withRecs);
           localStorage.setItem("aa_session_msgs", JSON.stringify(withRecs));
         }
@@ -421,9 +508,10 @@ export default function ChatPage() {
         <div ref={listRef} className="stream">
           <div className="inner">
             {messages.map((m) => (
-              <Message key={m.id} role={m.role} text={m.text} />
+              <Message key={m.id} role={m.role} text={m.text} onOptionClick={handleOptionClick} />
             ))}
 
+            {/* Typing Indicator */}
             {loading && <Typing />}
 
             {/* Finish Card (optional future use) */}
@@ -466,11 +554,43 @@ export default function ChatPage() {
                   }
                 }}
                 disabled={finished}
+                dir="auto"
+                style={{ textAlign: /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(input) ? "right" : "left" }}
               />
               <button className="btn cta" onClick={send} disabled={!input.trim() || loading || finished}>
                 Send
               </button>
             </div>
+
+            {/* End Conversation Button - Shows after recommendations */}
+            {recommendedMajors.length > 0 && (
+              <div style={{ marginTop: 12, textAlign: "center" }}>
+                <button 
+                  className="btn cta"
+                  onClick={() => {
+                    // Store summary data in localStorage for ResultsPage
+                    localStorage.setItem("aa_final_summary", JSON.stringify({
+                      sessionId,
+                      recommendedMajors,
+                      messages,
+                      language: lang,
+                      degree
+                    }));
+                    nav(`/results/${sessionId}`);
+                  }}
+                  style={{
+                    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                    padding: "12px 32px",
+                    fontSize: "16px",
+                    fontWeight: 600,
+                    width: "100%"
+                  }}
+                >
+                  {lang === 'he' ? '📄 סיים שיחה וקבל סיכום' : lang === 'ar' ? '📄 إنهاء المحادثة والحصول على ملخص' : '📄 End Conversation & Get Summary'}
+                </button>
+              </div>
+            )}
+
             <div className="hint">
               One-on-one interview. Click <strong>Exit</strong> to leave without viewing recommendations.
             </div>
@@ -522,14 +642,259 @@ function UserAvatar() {
   );
 }
 
-function Message({ role, text }) {
+function Message({ role, text, onOptionClick }) {
   const isUser = role === "user";
   // Strip "QUESTION: " prefix from advisor messages for display
   const displayText = !isUser ? stripQuestionPrefix(text) : text;
+  
+  // Detect if text contains Hebrew or Arabic characters
+  const isRTL = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(displayText);
+  
+  // Check if this is a recommendations message (contains numbered list with percentages)
+  // Look for pattern ANYWHERE in text, not just at start
+  const isRecommendations = !isUser && /\n\d+\.\s+.+?\s+\(\d+(?:\.\d+)?\s*%/.test(displayText);
+  
+  // Check if this is a follow-up question (appears after recommendations)
+  const isFollowUpQuestion = !isUser && !isRecommendations && (
+    /איזו מגמה מעניינת|הקלד את המספר/.test(displayText) ||
+    /which major interests|type the number/i.test(displayText) ||
+    /בחרת:.*מה תרצה לדעת/.test(displayText) ||
+    /you selected:.*what would you like/i.test(displayText)
+  );
+  
+  // Format the message content with proper styling
+  const formatMessage = (msg) => {
+    // Strip markdown bold formatting (** or __)
+    const cleanMsg = msg.replace(/\*\*(.*?)\*\*/g, '$1').replace(/__(.*?)__/g, '$1');
+    
+    const lines = cleanMsg.split('\n');
+    
+    if (!isRecommendations) {
+      // Regular message - detect multi-part greeting (college greeting + bagrut + question)
+      // College greeting pattern: short (< 150 chars), not a question, likely first part of 3+ part message
+      const parts = cleanMsg.split('\n\n');
+      
+      if (parts.length >= 3) {
+        const firstPart = parts[0].trim();
+        // Check if first part looks like a college/welcome greeting (short, no question mark)
+        if (firstPart.length < 150 && !firstPart.endsWith('?')) {
+          // Render first part BOLD as separate visual section
+          return (
+            <>
+              <div style={{ 
+                fontWeight: 700, 
+                fontSize: '16px',
+                marginBottom: '12px',
+                color: '#166534',
+                lineHeight: '1.5'
+              }}>
+                {firstPart}
+              </div>
+              <div style={{ fontSize: '14.5px', lineHeight: '1.6', color: '#1f2937' }}>
+                {parts.slice(1).join('\n\n')}
+              </div>
+            </>
+          );
+        }
+      }
+      
+      // Check if this is a follow-up question - render BOLD (no buttons)
+      if (isFollowUpQuestion) {
+        return (
+          <div style={{ 
+            fontWeight: 700, 
+            fontSize: '15px',
+            color: '#1f2937',
+            lineHeight: '1.6',
+            whiteSpace: 'pre-line'
+          }}>
+            {cleanMsg}
+          </div>
+        );
+      }
+      
+      return cleanMsg;
+    }
+    
+    // Format recommendations with beautiful styling
+    const formatted = [];
+    let introText = [];
+    let inMajorsList = false;
+    let currentMajor = null;
+    let currentRationale = [];
+    
+    lines.forEach((line, idx) => {
+      const trimmed = line.trim();
+      
+      // Match: "1. Major Name (95.5% Match)" or "1. Major Name (95.5% התאמה)"
+      const majorMatch = trimmed.match(/^(\d+)\.\s+(.+?)\s+\((\d+(?:\.\d+)?)\s*%\s*(.+?)\)$/);
+      
+      if (majorMatch) {
+        // Save previous major if exists
+        if (currentMajor) {
+          formatted.push(
+            <div key={`major-${formatted.length}`} style={{ 
+              marginBottom: '20px', 
+              paddingBottom: '16px', 
+              borderBottom: '1px solid rgba(22, 101, 52, 0.15)'
+            }}>
+              {currentMajor}
+              {currentRationale.length > 0 && (
+                <div style={{ 
+                  fontSize: '14px', 
+                  color: '#6b7280',
+                  lineHeight: '1.6',
+                  marginTop: '8px',
+                  paddingLeft: '0px',
+                  paddingRight: isRTL ? '0px' : '8px'
+                }}>
+                  {currentRationale.join(' ')}
+                </div>
+              )}
+            </div>
+          );
+          currentRationale = [];
+        }
+        
+        // Add intro text if we haven't entered majors list yet
+        if (!inMajorsList && introText.length > 0) {
+          formatted.push(
+            <div key="intro" style={{ 
+              fontWeight: 600, 
+              marginBottom: '16px', 
+              fontSize: '15px',
+              color: '#1f2937',
+              lineHeight: '1.5'
+            }}>
+              {introText.join('\n')}
+            </div>
+          );
+          introText = [];
+          inMajorsList = true;
+        }
+        
+        const rank = majorMatch[1];
+        const majorName = majorMatch[2].trim();
+        const score = parseFloat(majorMatch[3]);
+        const matchText = majorMatch[4]; // "Match" or "התאמה"
+        
+        // Create progress bar color based on score
+        const getScoreColor = (score) => {
+          if (score >= 90) return { bg: '#166534', text: '#ffffff' };
+          if (score >= 80) return { bg: '#16a34a', text: '#ffffff' };
+          if (score >= 70) return { bg: '#22c55e', text: '#ffffff' };
+          return { bg: '#86efac', text: '#166534' };
+        };
+        
+        const colors = getScoreColor(score);
+        
+        currentMajor = (
+          <>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '10px' }}>
+              <span style={{ 
+                fontSize: '20px', 
+                fontWeight: 700, 
+                color: '#166534',
+                minWidth: '28px',
+                lineHeight: '1.3'
+              }}>
+                {rank}.
+              </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ 
+                  fontSize: '17px', 
+                  fontWeight: 700, 
+                  color: '#1f2937',
+                  lineHeight: '1.4',
+                  marginBottom: '10px'
+                }}>
+                  {majorName}
+                </div>
+                
+                {/* Progress bar */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '10px',
+                  marginTop: '8px'
+                }}>
+                  <div style={{ 
+                    flex: 1,
+                    height: '8px',
+                    background: '#f3f4f6',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    position: 'relative'
+                  }}>
+                    <div style={{ 
+                      width: `${score}%`,
+                      height: '100%',
+                      background: `linear-gradient(90deg, ${colors.bg}, ${colors.bg}dd)`,
+                      borderRadius: '10px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                  <span style={{ 
+                    fontSize: '16px', 
+                    fontWeight: 700,
+                    color: colors.bg,
+                    minWidth: '70px',
+                    textAlign: isRTL ? 'left' : 'right'
+                  }}>
+                    {score}% {matchText}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      } else if (trimmed && inMajorsList) {
+        // This is a rationale line - accumulate it
+        currentRationale.push(trimmed);
+      } else if (trimmed && !inMajorsList) {
+        // This is intro text before the list
+        introText.push(trimmed);
+      }
+    });
+    
+    // Add last major
+    if (currentMajor) {
+      formatted.push(
+        <div key={`major-${formatted.length}`} style={{ 
+          marginBottom: '20px', 
+          paddingBottom: '16px', 
+          borderBottom: 'none'
+        }}>
+          {currentMajor}
+          {currentRationale.length > 0 && (
+            <div style={{ 
+              fontSize: '14px', 
+              color: '#6b7280',
+              lineHeight: '1.6',
+              marginTop: '8px',
+              paddingLeft: '0px',
+              paddingRight: isRTL ? '0px' : '8px'
+            }}>
+              {currentRationale.join(' ')}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    return <div>{formatted}</div>;
+  };
+  
   return (
     <div className={`msgrow ${isUser ? "user" : ""}`}>
       {!isUser && <AdvisorAvatar />}
-      <div className={`bubble ${isUser ? "user" : ""}`}>{displayText}</div>
+      <div 
+        className={`bubble ${isUser ? "user" : ""} ${isRecommendations ? "recommendations" : ""}`}
+        dir={isRTL ? "rtl" : "ltr"}
+        style={isRTL ? { textAlign: "right" } : {}}
+      >
+        {formatMessage(displayText)}
+      </div>
       {isUser && <UserAvatar />}
     </div>
   );

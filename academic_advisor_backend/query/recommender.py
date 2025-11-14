@@ -262,22 +262,125 @@ Only output the sentence."""
         if not self.llm:
             return f"Alignment ≈ {bagrut_pct}%. {eligibility_hint}".strip()
         
-        # CRITICAL: Enforce target language with example
+        # Get person's top strengths for personalization
+        person_scores = self._get_scores_dict()
+        top_strengths = sorted(person_scores.items(), key=lambda x: -x[1])[:3]
+        strengths_text = ", ".join([f"{k.replace('_', ' ')}" for k, _ in top_strengths])
+        
+        # Parse eligibility to understand admission status
+        is_eligible = "eligible" in eligibility_hint.lower() or eligibility_hint == "Eligible."
+        
+        # Get detailed eligibility rules
+        eligibility_rules = m.get('eligibility_rules', {})
+        min_grade = eligibility_rules.get('min_grade', 'Not specified')
+        required_subjects = eligibility_rules.get('required_subjects', [])
+        required_units = eligibility_rules.get('min_units', {})
+        
+        # Build eligibility details text
+        eligibility_details = []
+        if min_grade != 'Not specified':
+            eligibility_details.append(f"Minimum Bagrut average: {min_grade}")
+        if required_subjects:
+            eligibility_details.append(f"Required subjects: {', '.join(required_subjects[:3])}")
+        if required_units:
+            units_text = ', '.join([f"{subj} ({units} units)" for subj, units in list(required_units.items())[:2]])
+            if units_text:
+                eligibility_details.append(f"Unit requirements: {units_text}")
+        
+        eligibility_context = " | ".join(eligibility_details) if eligibility_details else eligibility_hint
+        
+        # ENHANCED PROMPT: Generate comprehensive summary with 5 sections including detailed eligibility
         prompt = f"""You are an academic advisor. CRITICAL: Respond ONLY in {self.ui_language} language.
 
-Write a concise 2-3 sentence explanation of why this major matches the student's profile.
-- Mention their relevant strengths from Bagrut
-- Keep it natural and encouraging
-- Language: {self.ui_language}
+Generate a comprehensive summary (5-6 sentences) explaining this major to the student.
 
-Major: {m.get('original_name') or m.get('english_name')}
-Keywords: {', '.join((m.get('keywords') or [])[:5])}
-Sample courses: {', '.join((m.get('sample_courses') or [])[:3])}
-Bagrut alignment: ~{bagrut_pct}%
-Eligibility: {eligibility_hint}
+STRUCTURE YOUR RESPONSE WITH THESE 5 SECTIONS:
 
-Your explanation in {self.ui_language}:"""
-        return self.llm.invoke(prompt).content.strip()
+1. **Why You're a Great Fit** (1 sentence):
+   - Connect their Bagrut strengths to this major's requirements
+   - Be specific and encouraging
+
+2. **What You'll Study** (1 sentence):
+   - Highlight 2-3 key courses/topics they'll learn
+   - Make it concrete and interesting
+
+3. **Skills You'll Gain** (1 sentence):
+   - List 3-4 practical skills they'll develop
+   - Focus on real-world applications
+
+4. **Admission Requirements** (1-2 sentences) - CRITICAL SECTION:
+   - List SPECIFIC requirements: minimum grades, required subjects, units
+   - CLEARLY state if student ALREADY MEETS requirements: "✓ You already meet all requirements!" 
+   - OR if NOT eligible yet: "You need: [specific missing items]"
+   - Be CONCRETE: mention actual grade numbers, subject names, unit counts
+   - Examples: 
+     * "✓ Eligible now! Requires 80+ Bagrut average (you have 85) and Math 5 units (you have it)."
+     * "Requires: Math 5 units (85+), English 4+ units, Bagrut average 75+. You need Math 5 units."
+
+5. **Career Opportunities** (1 sentence):
+   - Mention 2-3 specific career paths/job titles
+   - Be realistic and inspiring
+
+STUDENT'S PROFILE:
+- Top strengths: {strengths_text}
+- Bagrut alignment: ~{bagrut_pct}%
+- Eligibility status: {"✓ ALREADY ELIGIBLE" if is_eligible else "NEEDS REQUIREMENTS"}
+
+MAJOR DETAILS:
+- Name: {m.get('original_name') or m.get('english_name')}
+- Keywords: {', '.join((m.get('keywords') or [])[:8])}
+- Sample courses: {', '.join((m.get('sample_courses') or [])[:5])}
+
+ADMISSION REQUIREMENTS (mention ALL of these):
+{eligibility_context}
+
+CRITICAL REQUIREMENTS:
+- Write ONLY in {self.ui_language}
+- Section 4 (Admission) MUST be VERY specific with numbers and subject names
+- CLEARLY state if student is already eligible (use ✓ or "You're eligible!")
+- If not eligible, list EXACTLY what's missing
+- Be encouraging but honest
+- Total length: 5-6 sentences
+
+Your {self.ui_language} summary:"""
+        
+        try:
+            response = self.llm.invoke(prompt).content.strip()
+            # Ensure response is not empty and is reasonable length
+            if response and len(response) > 50:
+                return response
+            else:
+                # Fallback to simpler prompt
+                return self._fallback_paragraph(m, bagrut_pct, eligibility_hint, eligibility_rules)
+        except Exception as e:
+            print(f"[_paragraph:error] LLM generation failed: {e}")
+            return self._fallback_paragraph(m, bagrut_pct, eligibility_hint, eligibility_rules)
+    
+    def _fallback_paragraph(self, m: Dict[str, Any], bagrut_pct: int, eligibility_hint: str, eligibility_rules: Dict[str, Any] = None) -> str:
+        """Fallback when LLM fails - generate basic summary."""
+        major_name = m.get('original_name') or m.get('english_name')
+        courses = ', '.join((m.get('sample_courses') or [])[:3])
+        keywords = ', '.join((m.get('keywords') or [])[:4])
+        
+        # Build admission requirements text
+        admission_text = eligibility_hint
+        if eligibility_rules:
+            min_grade = eligibility_rules.get('min_grade')
+            required_subjects = eligibility_rules.get('required_subjects', [])
+            
+            if min_grade or required_subjects:
+                requirements = []
+                if min_grade:
+                    requirements.append(f"minimum Bagrut average {min_grade}")
+                if required_subjects:
+                    requirements.append(f"subjects: {', '.join(required_subjects[:2])}")
+                
+                admission_text = f"Admission requires {' and '.join(requirements)}. {eligibility_hint}"
+        
+        return f"{major_name} aligns {bagrut_pct}% with your profile. " \
+               f"You'll study {courses}. " \
+               f"Focus areas include {keywords}. " \
+               f"{admission_text}"
 
     # ---- public APIs --------------------------------------------------------
     def recommend_step(self, top_k: int = 2) -> List[Dict[str, Any]]:
@@ -298,7 +401,7 @@ Your explanation in {self.ui_language}:"""
             ))
         return [asdict(x) for x in out]
 
-    def recommend_final(self, top_k: int = 3, bagrut_json: Optional[Dict[str, Any]] = None, interview_text: str = "") -> List[Dict[str, Any]]:
+    def recommend_final(self, top_k: int = 3, bagrut_json: Optional[Dict[str, Any]] = None, interview_text: str = "", degree_filter: str = "both") -> List[Dict[str, Any]]:
         """
         Generate final recommendations with eligibility checks.
         
@@ -306,6 +409,7 @@ Your explanation in {self.ui_language}:"""
             top_k: Number of recommendations to return
             bagrut_json: Bagrut data for eligibility checking
             interview_text: Combined text from interview answers for field detection
+            degree_filter: Filter by degree type - "bachelor", "master", or "both"
         """
         # DEBUG: Show person vector state
         person_scores = self._get_scores_dict()
@@ -315,6 +419,44 @@ Your explanation in {self.ui_language}:"""
             print(f"  {crit}: {score:.1f}")
         
         prelim = self._rank()[:max(1, top_k * 2)]
+        
+        # DEGREE FILTERING: Filter by bachelor/master degree type
+        if degree_filter and degree_filter != "both":
+            print(f"[recommender:debug] Filtering by degree type: {degree_filter}")
+            filtered_prelim = []
+            for idx, base in prelim:
+                m = self.majors[idx]
+                major_name = m.get('original_name', '')
+                
+                # Check if major matches requested degree type
+                is_bachelor = 'תואר ראשון' in major_name or 'B.A.' in major_name or 'B.Sc.' in major_name
+                is_master = 'תואר שני' in major_name or 'M.A.' in major_name or 'M.Sc.' in major_name
+                
+                if degree_filter == "bachelor" and is_bachelor:
+                    filtered_prelim.append((idx, base))
+                elif degree_filter == "master" and is_master:
+                    filtered_prelim.append((idx, base))
+            
+            print(f"[recommender:debug] Filtered from {len(prelim)} to {len(filtered_prelim)} majors matching '{degree_filter}'")
+            prelim = filtered_prelim
+            
+            # If we filtered too much, expand the search
+            if len(prelim) < top_k:
+                print(f"[recommender:debug] Not enough majors after filtering, expanding search...")
+                all_ranked = self._rank()
+                for idx, base in all_ranked:
+                    if len(prelim) >= top_k * 2:
+                        break
+                    if (idx, base) not in prelim:
+                        m = self.majors[idx]
+                        major_name = m.get('original_name', '')
+                        is_bachelor = 'תואר ראשון' in major_name or 'B.A.' in major_name or 'B.Sc.' in major_name
+                        is_master = 'תואר שני' in major_name or 'M.A.' in major_name or 'M.Sc.' in major_name
+                        
+                        if degree_filter == "bachelor" and is_bachelor:
+                            prelim.append((idx, base))
+                        elif degree_filter == "master" and is_master:
+                            prelim.append((idx, base))
         
         # DEBUG: Show top scored majors BEFORE eligibility
         print(f"[recommender:debug] Top {len(prelim)} majors before eligibility:")
@@ -352,9 +494,9 @@ Your explanation in {self.ui_language}:"""
             if apply_tech_penalty and self._is_tech_major(m):
                 tech_penalty = 20.0  # -20% penalty for tech majors
             
-            # Calculate final score (NO CAP - let natural distribution show)
-            # High scores (95+) are rare and indicate exceptional fit
-            final_score = max(0.0, base - penalty + field_boost - tech_penalty)
+            # Calculate final score and CAP at 100 (cannot exceed perfect match)
+            # High scores (95+) indicate exceptional fit
+            final_score = min(100.0, max(0.0, base - penalty + field_boost - tech_penalty))
             
             # DEBUG: Show calculation for top majors
             major_name = m.get('original_name', '')
